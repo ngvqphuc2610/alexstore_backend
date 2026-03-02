@@ -1,0 +1,243 @@
+# AlexStore Backend – Implementation Plan
+
+Backend NestJS + Prisma + MySQL cho dự án AlexStore (e-commerce kiểu Shopee).
+
+## Proposed Changes
+
+---
+
+### Foundation
+
+#### [NEW] `package.json`, `tsconfig.json`, `nest-cli.json`
+NestJS project scaffold với các dependencies:
+- `@nestjs/core`, `@nestjs/common`, `@nestjs/platform-express`
+- `@prisma/client`, `prisma` (dev)
+- `@nestjs/jwt`, `@nestjs/passport`, `passport`, `passport-jwt`
+- `bcrypt`, `uuid`, `class-validator`, `class-transformer`
+- `@nestjs/config`
+
+#### [NEW] `.env.example`
+Template biến môi trường: `DATABASE_URL`, `JWT_SECRET`, `JWT_EXPIRES_IN`, `PORT`
+
+#### [NEW] `prisma/schema.prisma`
+Full schema dựa trên [database.txt](file:///d:/2A2026/alexstore/alexstore_backend/database.txt):
+- Models: `User`, `Category`, `Product`, `ProductImage`, `Cart`, `CartItem`, `Order`, `OrderItem`, `Review`
+- `id` dùng `Bytes` (BINARY 16) – UUID v7 sinh ở backend
+- Enums: `Role`, `ProductStatus`, `OrderStatus`, `PaymentStatus`
+- Index cho các field filter nhiều
+- Soft delete với `isDeleted Boolean @default(false)`
+
+#### [NEW] `prisma/migrations/` (first migration)
+Chạy `prisma migrate dev --name init`
+
+---
+
+### Core / Shared
+
+#### [NEW] `src/common/uuid.helper.ts`
+- `generateUuidV7(): Buffer` – dùng `uuidv7()` từ package `uuidv7`, convert sang Buffer
+- `uuidToBuffer(uuid: string): Buffer`
+- `bufferToUuid(buf: Buffer): string`
+
+#### [NEW] `src/common/filters/http-exception.filter.ts`
+Global exception filter – chuẩn hóa error response:
+```json
+{ "success": false, "statusCode": 400, "message": "...", "error": "..." }
+```
+
+#### [NEW] `src/common/interceptors/response.interceptor.ts`
+Global response interceptor – wrap dữ liệu:
+```json
+{ "success": true, "statusCode": 200, "data": {...} }
+```
+
+#### [NEW] `src/common/decorators/roles.decorator.ts`
+`@Roles(...roles: Role[])` decorator
+
+#### [NEW] `src/common/guards/jwt-auth.guard.ts`
+Guard kiểm tra JWT
+
+#### [NEW] `src/common/guards/roles.guard.ts`
+Guard kiểm tra Role từ decorator
+
+---
+
+### Config Module
+
+#### [NEW] `src/config/config.module.ts`
+`@nestjs/config` toàn cục – load `.env`
+
+---
+
+### Auth Module
+
+#### [NEW] `src/auth/auth.module.ts`
+#### [NEW] `src/auth/auth.controller.ts`
+- `POST /auth/register`
+- `POST /auth/login`
+
+#### [NEW] `src/auth/auth.service.ts`
+- `register(dto)`: hash password bcrypt, sinh UUID v7, tạo user
+- `login(dto)`: verify password, trả JWT chứa `{ sub, email, role }`
+
+#### [NEW] `src/auth/dto/register.dto.ts`, `login.dto.ts`
+#### [NEW] `src/auth/strategies/jwt.strategy.ts`
+
+---
+
+### User Module
+
+#### [NEW] `src/users/users.module.ts`
+#### [NEW] `src/users/users.controller.ts`
+- `GET /users/me` (authenticated)
+- `PUT /users/me`
+- `DELETE /users/me` (soft delete)
+
+#### [NEW] `src/users/users.service.ts`
+#### [NEW] `src/users/dto/update-user.dto.ts`
+
+---
+
+### Category Module
+
+#### [NEW] `src/categories/categories.module.ts`
+#### [NEW] `src/categories/categories.controller.ts`
+- `GET /categories`
+- `POST /categories` (ADMIN)
+- `PUT /categories/:id` (ADMIN)
+- `DELETE /categories/:id` (ADMIN)
+
+#### [NEW] `src/categories/categories.service.ts`
+#### [NEW] `src/categories/dto/create-category.dto.ts`
+
+---
+
+### Product Module
+
+#### [NEW] `src/products/products.module.ts`
+#### [NEW] `src/products/products.controller.ts`
+- `GET /products` (public, filter by category/status/seller)
+- `GET /products/:id` (public)
+- `POST /products` (SELLER)
+- `PUT /products/:id` (SELLER/ADMIN)
+- `DELETE /products/:id` (SELLER soft delete)
+- `PATCH /products/:id/status` (ADMIN approve/reject)
+
+#### [NEW] `src/products/products.service.ts`
+#### [NEW] `src/products/dto/*.dto.ts`
+
+---
+
+### Cart Module
+
+#### [NEW] `src/cart/cart.module.ts`
+#### [NEW] `src/cart/cart.controller.ts`
+- `GET /cart` (BUYER)
+- `POST /cart/items`
+- `PUT /cart/items/:id`
+- `DELETE /cart/items/:id`
+
+#### [NEW] `src/cart/cart.service.ts`
+#### [NEW] `src/cart/dto/*.dto.ts`
+
+---
+
+### Order Module (Transaction)
+
+#### [NEW] `src/orders/orders.module.ts`
+#### [NEW] `src/orders/orders.controller.ts`
+- `POST /orders` (BUYER)
+- `GET /orders` (BUYER - lịch sử)
+- `GET /orders/:id`
+- `PATCH /orders/:id/cancel` (BUYER)
+- `PATCH /orders/:id/status` (SELLER/ADMIN)
+
+#### [NEW] `src/orders/orders.service.ts`
+`placeOrder()` dùng `prisma.$transaction`:
+1. Lock và check product (status=APPROVED, stock>=qty, !isDeleted)
+2. Trừ stock
+3. Tạo Order với UUID v7
+4. Tạo OrderItem
+5. Commit
+
+#### [NEW] `src/orders/dto/*.dto.ts`
+
+---
+
+### Review Module (Transaction)
+
+#### [NEW] `src/reviews/reviews.module.ts`
+#### [NEW] `src/reviews/reviews.controller.ts`
+- `POST /reviews` (BUYER đã mua)
+- `GET /reviews?productId=...`
+
+#### [NEW] `src/reviews/reviews.service.ts`
+`submitReview()` dùng `prisma.$transaction`:
+1. Kiểm tra buyer đã mua sản phẩm
+2. Insert review
+3. Tính lại avg_rating, review_count
+4. Update product
+
+#### [NEW] `src/reviews/dto/*.dto.ts`
+
+---
+
+### App Root
+
+#### [NEW] `src/app.module.ts`
+Import tất cả modules, global pipes (ValidationPipe), PrismaModule
+
+#### [NEW] `src/main.ts`
+Bootstrap với global exception filter, interceptor, ValidationPipe
+
+#### [NEW] `src/prisma/prisma.module.ts`, `src/prisma/prisma.service.ts`
+PrismaService extends PrismaClient, onModuleInit connect
+
+---
+
+## Verification Plan
+
+### Automated – Manual API Testing (curl / REST Client)
+
+1. **Register user**
+```bash
+curl -X POST http://localhost:3000/auth/register \
+  -H "Content-Type: application/json" \
+  -d '{"username":"buyer1","email":"buyer@test.com","password":"Test@1234","role":"BUYER"}'
+```
+Expected: `201` với user data (không có password)
+
+2. **Login**
+```bash
+curl -X POST http://localhost:3000/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email":"buyer@test.com","password":"Test@1234"}'
+```
+Expected: `200` với `{ data: { accessToken: "..." } }`
+
+3. **Get profile (authenticated)**
+```bash
+curl http://localhost:3000/users/me \
+  -H "Authorization: Bearer <token>"
+```
+
+4. **Create product (SELLER)**
+Đăng ký seller → login → tạo product
+
+5. **Place order (BUYER, transaction)**
+Add to cart → place order → verify stock giảm
+
+6. **Submit review (transaction)**
+Submit review → verify avg_rating và review_count được cập nhật
+
+### Build Verification
+```bash
+npm run build
+```
+Expected: No TypeScript errors
+
+### Dev Server
+```bash
+npm run start:dev
+```
+Expected: Server running on port 3000, Prisma connected

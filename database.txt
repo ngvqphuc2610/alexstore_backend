@@ -1,0 +1,111 @@
+CREATE DATABASE IF NOT EXISTS alexstore_db;
+USE alexstore_db;
+CREATE TABLE users (
+    id BINARY(16) PRIMARY KEY,
+    username VARCHAR(50) NOT NULL UNIQUE,
+    email VARCHAR(100) NOT NULL UNIQUE,
+    password_hash VARCHAR(255) NOT NULL,
+    role ENUM('BUYER', 'SELLER', 'ADMIN') DEFAULT 'BUYER',
+    is_seller_verified BOOLEAN DEFAULT FALSE,
+    is_deleted BOOLEAN DEFAULT FALSE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_users_role (role),
+    INDEX idx_users_created (created_at)
+);
+CREATE TABLE categories (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(100) NOT NULL,
+    parent_id INT NULL,
+    FOREIGN KEY (parent_id) REFERENCES categories(id) ON DELETE SET NULL
+);
+CREATE TABLE products (
+    id BINARY(16) PRIMARY KEY,
+    seller_id BINARY(16) NOT NULL,
+    category_id INT NOT NULL,
+    name VARCHAR(255) NOT NULL,
+    description TEXT,
+    price DECIMAL(15,2) NOT NULL,
+    stock_quantity INT NOT NULL DEFAULT 0,
+    avg_rating DECIMAL(3,2) NOT NULL DEFAULT 0.00,
+    review_count INT NOT NULL DEFAULT 0,
+    status ENUM('PENDING','APPROVED','REJECTED','HIDDEN') DEFAULT 'PENDING',
+    is_deleted BOOLEAN DEFAULT FALSE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (seller_id) REFERENCES users(id),
+    FOREIGN KEY (category_id) REFERENCES categories(id),
+    INDEX idx_products_seller (seller_id),
+    INDEX idx_products_category (category_id),
+    INDEX idx_products_status (status),
+    INDEX idx_products_created (created_at),
+    INDEX idx_products_rating (avg_rating)
+);
+CREATE TABLE product_images (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    product_id BINARY(16) NOT NULL,
+    image_url VARCHAR(500) NOT NULL,
+    is_primary BOOLEAN DEFAULT FALSE,
+    sort_order INT DEFAULT 0,
+    FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE,
+    INDEX idx_product_images_product (product_id)
+);
+CREATE TABLE carts (
+    id BINARY(16) PRIMARY KEY,
+    buyer_id BINARY(16) NOT NULL UNIQUE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (buyer_id) REFERENCES users(id) ON DELETE CASCADE
+);
+CREATE TABLE cart_items (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    cart_id BINARY(16) NOT NULL,
+    product_id BINARY(16) NOT NULL,
+    quantity INT NOT NULL DEFAULT 1,
+    UNIQUE KEY uq_cart_product (cart_id, product_id),
+    FOREIGN KEY (cart_id) REFERENCES carts(id) ON DELETE CASCADE,
+    FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE,
+    INDEX idx_cart_items_cart (cart_id)
+);
+CREATE TABLE orders (
+    id BINARY(16) PRIMARY KEY,
+    order_code VARCHAR(30) NOT NULL UNIQUE,
+    buyer_id BINARY(16) NOT NULL,
+    total_amount DECIMAL(15,2) NOT NULL DEFAULT 0,
+    status ENUM('PENDING','PAID','SHIPPING','DELIVERED','CANCELLED') DEFAULT 'PENDING',
+    payment_method VARCHAR(50),
+    payment_status ENUM('UNPAID','PAID','FAILED','REFUNDED') DEFAULT 'UNPAID',
+    payment_transaction_id VARCHAR(100),
+    paid_at TIMESTAMP NULL,
+    shipping_address TEXT NOT NULL,
+    is_deleted BOOLEAN DEFAULT FALSE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (buyer_id) REFERENCES users(id),
+    INDEX idx_orders_buyer (buyer_id),
+    INDEX idx_orders_status (status),
+    INDEX idx_orders_created (created_at)
+);
+CREATE TABLE order_items (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    order_id BINARY(16) NOT NULL,
+    product_id BINARY(16) NOT NULL,
+    quantity INT NOT NULL,
+    price_at_purchase DECIMAL(15,2) NOT NULL,
+    FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE,
+    FOREIGN KEY (product_id) REFERENCES products(id),
+    INDEX idx_order_items_order (order_id)
+);
+CREATE TABLE reviews (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    product_id BINARY(16) NOT NULL,
+    buyer_id BINARY(16) NOT NULL,
+    rating TINYINT NOT NULL,
+    comment TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_review_user_product (buyer_id, product_id),
+    FOREIGN KEY (product_id) REFERENCES products(id),
+    FOREIGN KEY (buyer_id) REFERENCES users(id),
+    INDEX idx_reviews_product (product_id),
+    CHECK (rating BETWEEN 1 AND 5)
+);

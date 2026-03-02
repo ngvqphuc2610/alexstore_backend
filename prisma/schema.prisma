@@ -1,0 +1,197 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+}
+
+// ─── Enums ───────────────────────────────────────────────────────────────────
+
+enum Role {
+  BUYER
+  SELLER
+  ADMIN
+}
+
+enum ProductStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  HIDDEN
+}
+
+enum OrderStatus {
+  PENDING
+  PAID
+  SHIPPING
+  DELIVERED
+  CANCELLED
+}
+
+enum PaymentStatus {
+  UNPAID
+  PAID
+  FAILED
+  REFUNDED
+}
+
+// ─── Models ──────────────────────────────────────────────────────────────────
+
+model User {
+  id               Bytes     @id @db.Binary(16)
+  username         String    @unique @db.VarChar(50)
+  email            String    @unique @db.VarChar(100)
+  passwordHash     String    @map("password_hash") @db.VarChar(255)
+  role             Role      @default(BUYER)
+  isSellerVerified Boolean   @default(false) @map("is_seller_verified")
+  isDeleted        Boolean   @default(false) @map("is_deleted")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+
+  products Product[]
+  cart     Cart?
+  orders   Order[]
+  reviews  Review[]
+
+  @@index([role], name: "idx_users_role")
+  @@index([createdAt], name: "idx_users_created")
+  @@map("users")
+}
+
+model Category {
+  id       Int       @id @default(autoincrement())
+  name     String    @db.VarChar(100)
+  parentId Int?      @map("parent_id")
+  parent   Category? @relation("CategoryToCategory", fields: [parentId], references: [id], onDelete: SetNull)
+  children Category[] @relation("CategoryToCategory")
+  products Product[]
+
+  @@map("categories")
+}
+
+model Product {
+  id            Bytes         @id @db.Binary(16)
+  sellerId      Bytes         @map("seller_id") @db.Binary(16)
+  categoryId    Int           @map("category_id")
+  name          String        @db.VarChar(255)
+  description   String?       @db.Text
+  price         Decimal       @db.Decimal(15, 2)
+  stockQuantity Int           @default(0) @map("stock_quantity")
+  avgRating     Decimal       @default(0.00) @map("avg_rating") @db.Decimal(3, 2)
+  reviewCount   Int           @default(0) @map("review_count")
+  status        ProductStatus @default(PENDING)
+  isDeleted     Boolean       @default(false) @map("is_deleted")
+  createdAt     DateTime      @default(now()) @map("created_at")
+  updatedAt     DateTime      @updatedAt @map("updated_at")
+
+  seller     User           @relation(fields: [sellerId], references: [id])
+  category   Category       @relation(fields: [categoryId], references: [id])
+  images     ProductImage[]
+  cartItems  CartItem[]
+  orderItems OrderItem[]
+  reviews    Review[]
+
+  @@index([sellerId], name: "idx_products_seller")
+  @@index([categoryId], name: "idx_products_category")
+  @@index([status], name: "idx_products_status")
+  @@index([createdAt], name: "idx_products_created")
+  @@index([avgRating], name: "idx_products_rating")
+  @@map("products")
+}
+
+model ProductImage {
+  id        BigInt  @id @default(autoincrement())
+  productId Bytes   @map("product_id") @db.Binary(16)
+  imageUrl  String  @map("image_url") @db.VarChar(500)
+  isPrimary Boolean @default(false) @map("is_primary")
+  sortOrder Int     @default(0) @map("sort_order")
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([productId], name: "idx_product_images_product")
+  @@map("product_images")
+}
+
+model Cart {
+  id        Bytes    @id @db.Binary(16)
+  buyerId   Bytes    @unique @map("buyer_id") @db.Binary(16)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  buyer     User       @relation(fields: [buyerId], references: [id], onDelete: Cascade)
+  cartItems CartItem[]
+
+  @@map("carts")
+}
+
+model CartItem {
+  id        BigInt @id @default(autoincrement())
+  cartId    Bytes  @map("cart_id") @db.Binary(16)
+  productId Bytes  @map("product_id") @db.Binary(16)
+  quantity  Int    @default(1)
+
+  cart    Cart    @relation(fields: [cartId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([cartId, productId], name: "uq_cart_product")
+  @@index([cartId], name: "idx_cart_items_cart")
+  @@map("cart_items")
+}
+
+model Order {
+  id                   Bytes         @id @db.Binary(16)
+  orderCode            String        @unique @map("order_code") @db.VarChar(30)
+  buyerId              Bytes         @map("buyer_id") @db.Binary(16)
+  totalAmount          Decimal       @default(0) @map("total_amount") @db.Decimal(15, 2)
+  status               OrderStatus   @default(PENDING)
+  paymentMethod        String?       @map("payment_method") @db.VarChar(50)
+  paymentStatus        PaymentStatus @default(UNPAID) @map("payment_status")
+  paymentTransactionId String?       @map("payment_transaction_id") @db.VarChar(100)
+  paidAt               DateTime?     @map("paid_at")
+  shippingAddress      String        @map("shipping_address") @db.Text
+  isDeleted            Boolean       @default(false) @map("is_deleted")
+  createdAt            DateTime      @default(now()) @map("created_at")
+  updatedAt            DateTime      @updatedAt @map("updated_at")
+
+  buyer      User        @relation(fields: [buyerId], references: [id])
+  orderItems OrderItem[]
+
+  @@index([buyerId], name: "idx_orders_buyer")
+  @@index([status], name: "idx_orders_status")
+  @@index([createdAt], name: "idx_orders_created")
+  @@map("orders")
+}
+
+model OrderItem {
+  id              BigInt  @id @default(autoincrement())
+  orderId         Bytes   @map("order_id") @db.Binary(16)
+  productId       Bytes   @map("product_id") @db.Binary(16)
+  quantity        Int
+  priceAtPurchase Decimal @map("price_at_purchase") @db.Decimal(15, 2)
+
+  order   Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id])
+
+  @@index([orderId], name: "idx_order_items_order")
+  @@map("order_items")
+}
+
+model Review {
+  id        BigInt   @id @default(autoincrement())
+  productId Bytes    @map("product_id") @db.Binary(16)
+  buyerId   Bytes    @map("buyer_id") @db.Binary(16)
+  rating    Int      @db.TinyInt
+  comment   String?  @db.Text
+  createdAt DateTime @default(now()) @map("created_at")
+
+  product Product @relation(fields: [productId], references: [id])
+  buyer   User    @relation(fields: [buyerId], references: [id])
+
+  @@unique([buyerId, productId], name: "uq_review_user_product")
+  @@index([productId], name: "idx_reviews_product")
+  @@map("reviews")
+}

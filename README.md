@@ -28,7 +28,7 @@ npm install
 ### 2. Cấu hình biến môi trường
 Tạo file `.env` từ mẫu `.env.example` và điền thông tin Database của bạn:
 ```bash
-DATABASE_URL="mysql://root:123456@localhost:3307/alexstore_db"
+DATABASE_URL="mysql://name:password@localhost:port/database_name"
 JWT_SECRET="your_secret_key"
 JWT_EXPIRES_IN="7d"
 PORT=3000

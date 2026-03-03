@@ -26,4 +26,9 @@ export class RegisterDto {
     @IsOptional()
     @IsEnum(Role)
     role?: Role;
+
+    @ApiPropertyOptional({ example: 'My Store', description: 'Shop name for sellers' })
+    @IsOptional()
+    @IsString()
+    shopName?: string;
 }

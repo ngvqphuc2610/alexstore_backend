@@ -1,12 +1,15 @@
-import { NestFactory, Reflector } from '@nestjs/core';
+import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import { AppModule } from './app.module';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
 import { ResponseInterceptor } from './common/interceptors/response.interceptor';
+import helmet from 'helmet';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
+
+  app.use(helmet());
 
   // ─── Swagger ───────────────────────────────────────────────────────────────
   const config = new DocumentBuilder()
@@ -47,7 +50,8 @@ async function bootstrap() {
   // ─── Global Response Interceptor ──────────────────────────────────────────
   app.useGlobalInterceptors(new ResponseInterceptor());
 
-  const port = process.env.PORT ?? 3000;
+  const port = process.env.PORT ?? 8080;
+  app.enableShutdownHooks();
   await app.listen(port);
 
   console.log(`🚀 AlexStore API running on: http://localhost:${port}/api/v1`);

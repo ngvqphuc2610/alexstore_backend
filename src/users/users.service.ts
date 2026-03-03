@@ -11,20 +11,21 @@ export class UsersService {
         const idBuf = uuidToBuffer(idStr);
         const user = await this.prisma.user.findFirst({
             where: { id: idBuf, isDeleted: false },
-            select: {
-                id: true,
-                username: true,
-                email: true,
-                role: true,
-                isSellerVerified: true,
-                createdAt: true,
-                updatedAt: true,
+            include: {
+                buyerProfile: true,
+                sellerProfile: true,
             },
         });
 
         if (!user) throw new NotFoundException('User not found');
 
-        return { ...user, id: bufferToUuid(user.id) };
+        const { passwordHash, ...safeUser } = user;
+        return {
+            ...safeUser,
+            id: bufferToUuid(user.id),
+            // Simplify response based on role
+            profile: user.role === 'BUYER' ? user.buyerProfile : user.sellerProfile,
+        };
     }
 
     async update(idStr: string, dto: UpdateUserDto) {
@@ -37,17 +38,18 @@ export class UsersService {
         const updated = await this.prisma.user.update({
             where: { id: idBuf },
             data: dto,
-            select: {
-                id: true,
-                username: true,
-                email: true,
-                role: true,
-                isSellerVerified: true,
-                updatedAt: true,
+            include: {
+                buyerProfile: true,
+                sellerProfile: true,
             },
         });
 
-        return { ...updated, id: bufferToUuid(updated.id) };
+        const { passwordHash, ...safeUpdated } = updated;
+        return {
+            ...safeUpdated,
+            id: bufferToUuid(updated.id),
+            profile: updated.role === 'BUYER' ? updated.buyerProfile : updated.sellerProfile,
+        };
     }
 
     async softDelete(idStr: string) {

@@ -31,6 +31,7 @@ export class AuthService {
 
         const passwordHash = await bcrypt.hash(dto.password, 12);
         const id = generateUuidV7();
+        const role = dto.role ?? Role.BUYER;
 
         const user = await this.prisma.user.create({
             data: {
@@ -38,7 +39,23 @@ export class AuthService {
                 username: dto.username,
                 email: dto.email,
                 passwordHash,
-                role: dto.role ?? Role.BUYER,
+                role,
+                // Create profile based on role
+                ...(role === Role.BUYER
+                    ? { buyerProfile: { create: {} } }
+                    : role === Role.SELLER
+                        ? {
+                            sellerProfile: {
+                                create: {
+                                    shopName: dto.shopName || `${dto.username}'s Shop`,
+                                },
+                            },
+                        }
+                        : {}),
+            },
+            include: {
+                buyerProfile: true,
+                sellerProfile: true,
             },
         });
 
@@ -48,6 +65,7 @@ export class AuthService {
             email: user.email,
             role: user.role,
             createdAt: user.createdAt,
+            profile: role === Role.BUYER ? user.buyerProfile : user.sellerProfile,
         };
     }
 

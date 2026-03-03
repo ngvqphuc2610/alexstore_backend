@@ -40,27 +40,70 @@ enum PaymentStatus {
   REFUNDED
 }
 
+enum MembershipLevel {
+  NORMAL
+  SILVER
+  GOLD
+  VIP
+}
+
+enum SellerType {
+  STANDARD
+  MALL
+  PRO
+}
+
 // ─── Models ──────────────────────────────────────────────────────────────────
 
 model User {
-  id               Bytes     @id @db.Binary(16)
-  username         String    @unique @db.VarChar(50)
-  email            String    @unique @db.VarChar(100)
-  passwordHash     String    @map("password_hash") @db.VarChar(255)
-  role             Role      @default(BUYER)
-  isSellerVerified Boolean   @default(false) @map("is_seller_verified")
-  isDeleted        Boolean   @default(false) @map("is_deleted")
-  createdAt        DateTime  @default(now()) @map("created_at")
-  updatedAt        DateTime  @updatedAt @map("updated_at")
+  id           Bytes    @id @db.Binary(16)
+  username     String   @unique @db.VarChar(50)
+  email        String   @unique @db.VarChar(100)
+  passwordHash String   @map("password_hash") @db.VarChar(255)
+  role         Role     @default(BUYER)
+  isDeleted    Boolean  @default(false) @map("is_deleted")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
 
-  products Product[]
-  cart     Cart?
-  orders   Order[]
-  reviews  Review[]
+  buyerProfile  BuyerProfile?
+  sellerProfile SellerProfile?
+  products      Product[]
+  cart          Cart?
+  orders        Order[]
+  reviews       Review[]
 
   @@index([role], name: "idx_users_role")
   @@index([createdAt], name: "idx_users_created")
   @@map("users")
+}
+
+model BuyerProfile {
+  userId          Bytes           @id @map("user_id") @db.Binary(16)
+  membershipLevel MembershipLevel @default(NORMAL) @map("membership_level")
+  loyaltyPoints   Int             @default(0) @map("loyalty_points")
+  totalSpent      Decimal         @default(0.00) @map("total_spent") @db.Decimal(15, 2)
+  createdAt       DateTime        @default(now()) @map("created_at")
+  updatedAt       DateTime        @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("buyer_profiles")
+}
+
+model SellerProfile {
+  userId      Bytes      @id @map("user_id") @db.Binary(16)
+  shopName    String     @map("shop_name") @db.VarChar(100)
+  sellerType  SellerType @default(STANDARD) @map("seller_type")
+  isVerified  Boolean    @default(false) @map("is_verified")
+  taxCode     String?    @map("tax_code") @db.VarChar(50)
+  shopRating  Decimal    @default(0.00) @map("shop_rating") @db.Decimal(3, 2)
+  pickupAddress String?  @map("pickup_address") @db.Text
+  createdAt   DateTime   @default(now()) @map("created_at")
+  updatedAt   DateTime   @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("seller_profiles")
 }
 
 model Category {

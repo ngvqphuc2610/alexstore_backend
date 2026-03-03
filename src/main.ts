@@ -9,6 +9,11 @@ import helmet from 'helmet';
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 
+  // Fix BigInt serialization issue
+  (BigInt.prototype as any).toJSON = function () {
+    return this.toString();
+  };
+
   app.use(helmet());
 
   // ─── Swagger ───────────────────────────────────────────────────────────────

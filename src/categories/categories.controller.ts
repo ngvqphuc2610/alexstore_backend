@@ -12,6 +12,7 @@ import {
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { CategoriesService } from './categories.service';
 import { CreateCategoryDto } from './dto/create-category.dto';
+import { UpdateCategoryDto } from './dto/update-category.dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
@@ -58,7 +59,7 @@ export class CategoriesController {
     @ApiResponse({ status: 404, description: 'Category not found.' })
     update(
         @Param('id', ParseIntPipe) id: number,
-        @Body() dto: CreateCategoryDto,
+        @Body() dto: UpdateCategoryDto,
     ) {
         return this.categoriesService.update(id, dto);
     }

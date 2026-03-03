@@ -1,11 +1,31 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { UpdateUserDto } from './dto/update-user.dto';
-import { bufferToUuid, uuidToBuffer } from '../common/helpers/uuid.helper';
+import { CreateUserDto } from './dto/create-user.dto';
+import { bufferToUuid, uuidToBuffer, generateUuidV7 } from '../common/helpers/uuid.helper';
+import * as bcrypt from 'bcrypt';
+import { Role } from '@prisma/client';
 
 @Injectable()
 export class UsersService {
     constructor(private prisma: PrismaService) { }
+    async findAll() {
+        const users = await this.prisma.user.findMany({
+            include: {
+                buyerProfile: true,
+                sellerProfile: true,
+            },
+            orderBy: { createdAt: 'asc' },
+        });
+        return users.map(user => {
+            const { passwordHash, ...safeUser } = user;
+            return {
+                ...safeUser,
+                id: bufferToUuid(user.id),
+                profile: user.role === Role.BUYER ? user.buyerProfile : user.sellerProfile,
+            };
+        });
+    }
 
     async findById(idStr: string) {
         const idBuf = uuidToBuffer(idStr);
@@ -25,6 +45,50 @@ export class UsersService {
             id: bufferToUuid(user.id),
             // Simplify response based on role
             profile: user.role === 'BUYER' ? user.buyerProfile : user.sellerProfile,
+        };
+    }
+    async create(dto: CreateUserDto) {
+        // Check uniqueness
+        const exists = await this.prisma.user.findFirst({
+            where: {
+                OR: [{ email: dto.email }, { username: dto.username }],
+            },
+        });
+        if (exists) {
+            throw new ConflictException('Email or username already taken');
+        }
+        const passwordHash = await bcrypt.hash(dto.password, 12);
+        const id = generateUuidV7();
+        const role = dto.role ?? Role.BUYER;
+        const user = await this.prisma.user.create({
+            data: {
+                id,
+                username: dto.username,
+                email: dto.email,
+                passwordHash,
+                role,
+                ...(role === Role.BUYER
+                    ? { buyerProfile: { create: {} } }
+                    : role === Role.SELLER
+                        ? {
+                            sellerProfile: {
+                                create: {
+                                    shopName: dto.shopName || `${dto.username}'s Shop`,
+                                },
+                            },
+                        }
+                        : {}),
+            },
+            include: {
+                buyerProfile: true,
+                sellerProfile: true,
+            },
+        });
+        const { passwordHash: _, ...safeUser } = user;
+        return {
+            ...safeUser,
+            id: bufferToUuid(user.id),
+            profile: role === Role.BUYER ? user.buyerProfile : user.sellerProfile,
         };
     }
 

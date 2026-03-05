@@ -88,7 +88,7 @@ export class ProductsService {
                 take: limit,
                 orderBy: { createdAt: 'desc' },
                 include: {
-                    images: { where: { isPrimary: true }, take: 1 },
+                    images: { orderBy: { isPrimary: 'desc' }, take: 1 },
                     category: true,
                 },
             }),

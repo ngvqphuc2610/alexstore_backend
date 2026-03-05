@@ -121,8 +121,19 @@ model Category {
   parent   Category? @relation("CategoryToCategory", fields: [parentId], references: [id], onDelete: SetNull)
   children Category[] @relation("CategoryToCategory")
   products Product[]
+  allowedSellerTypes CategoryAllowedSellerType[]
 
   @@map("categories")
+}
+
+model CategoryAllowedSellerType {
+  id         Int        @id @default(autoincrement())
+  categoryId Int        @map("category_id")
+  sellerType SellerType @map("seller_type")
+  category   Category   @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  @@unique([categoryId, sellerType])
+  @@map("category_allowed_seller_types")
 }
 
 model Product {

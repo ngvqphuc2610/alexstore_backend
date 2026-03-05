@@ -16,7 +16,9 @@ import { UpdateCategoryDto } from './dto/update-category.dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
+import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Role } from '@prisma/client';
+import { PrismaService } from '../prisma/prisma.service';
 
 @ApiTags('Categories')
 @Controller('categories')
@@ -24,9 +26,14 @@ export class CategoriesController {
     constructor(private readonly categoriesService: CategoriesService) { }
 
     @Get()
-    @ApiOperation({ summary: 'Find all categories' })
+    @ApiOperation({ summary: 'Find all categories (filtered if Seller)' })
     @ApiResponse({ status: 200, description: 'Return all categories.' })
-    findAll() {
+    @UseGuards(JwtAuthGuard)
+    @ApiBearerAuth()
+    async findAll(@CurrentUser() user: any) {
+        if (user) {
+            return this.categoriesService.findAllForUser(user.id, user.role);
+        }
         return this.categoriesService.findAll();
     }
 

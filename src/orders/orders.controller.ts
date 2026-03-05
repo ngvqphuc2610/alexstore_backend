@@ -54,6 +54,14 @@ export class OrdersController {
         return this.ordersService.findByBuyer(userId);
     }
 
+    @Get('seller/all')
+    @UseGuards(RolesGuard)
+    @Roles(Role.SELLER)
+    @ApiOperation({ summary: 'Get current seller orders' })
+    findSellerOrders(@CurrentUser('id') userId: string) {
+        return this.ordersService.findBySeller(userId);
+    }
+
     @Get(':id')
     @ApiOperation({ summary: 'Get order by ID' })
     @ApiResponse({ status: 200, description: 'Return the order.' })

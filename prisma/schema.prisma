@@ -53,6 +53,13 @@ enum SellerType {
   PRO
 }
 
+enum SupportRequestStatus {
+  PENDING
+  IN_PROGRESS
+  RESOLVED
+  REJECTED
+}
+
 // ─── Models ──────────────────────────────────────────────────────────────────
 
 model User {
@@ -70,7 +77,8 @@ model User {
   products      Product[]
   cart          Cart?
   orders        Order[]
-  reviews       Review[]
+  reviews         Review[]
+  supportRequests SupportRequest[]
 
   @@index([role], name: "idx_users_role")
   @@index([createdAt], name: "idx_users_created")
@@ -238,4 +246,22 @@ model Review {
   @@unique([buyerId, productId], name: "uq_review_user_product")
   @@index([productId], name: "idx_reviews_product")
   @@map("reviews")
+}
+
+model SupportRequest {
+  id          Int                  @id @default(autoincrement())
+  userId      Bytes                @map("user_id") @db.Binary(16)
+  type        String               @db.VarChar(50) // e.g., "CATEGORY_REQ", "BUG", "TECHNICAL", "OTHER"
+  title       String               @db.VarChar(255)
+  description String               @db.Text
+  status      SupportRequestStatus @default(PENDING)
+  adminReply  String?              @map("admin_reply") @db.Text
+  createdAt   DateTime             @default(now()) @map("created_at")
+  updatedAt   DateTime             @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId], name: "idx_support_requests_user")
+  @@index([status], name: "idx_support_requests_status")
+  @@map("support_requests")
 }

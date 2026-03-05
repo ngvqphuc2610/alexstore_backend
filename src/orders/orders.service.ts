@@ -140,6 +140,48 @@ export class OrdersService {
         return orders.map((o) => this.serializeOrder(o));
     }
 
+    async findBySeller(sellerIdStr: string) {
+        const sellerId = uuidToBuffer(sellerIdStr);
+        // Find orders where at least one item is a product belonging to this seller
+        const orders = await this.prisma.order.findMany({
+            where: {
+                isDeleted: false,
+                orderItems: {
+                    some: {
+                        product: {
+                            sellerId: sellerId,
+                        },
+                    },
+                },
+            },
+            orderBy: { createdAt: 'desc' },
+            include: {
+                orderItems: {
+                    include: {
+                        product: {
+                            select: {
+                                id: true,
+                                name: true,
+                                sellerId: true,
+                            },
+                        },
+                    },
+                },
+            },
+        });
+
+        // Filter orderItems to only show products of THIS seller for each order? 
+        // Usually, the seller only sees the items they sold in that order.
+        return orders.map((o) => {
+            const serialized = this.serializeOrder(o);
+            // Optionally filter orderItems to only include this seller's products
+            serialized.orderItems = serialized.orderItems.filter(
+                (item: any) => bufferToUuid(item.product.sellerId) === sellerIdStr,
+            );
+            return serialized;
+        });
+    }
+
     async findOne(idStr: string, userId: string, userRole: Role) {
         const id = uuidToBuffer(idStr);
         const order = await this.prisma.order.findFirst({

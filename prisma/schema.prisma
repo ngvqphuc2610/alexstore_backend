@@ -277,3 +277,21 @@ model SupportRequest {
   @@index([status], name: "idx_support_requests_status")
   @@map("support_requests")
 }
+
+model DailyPerformanceStats {
+  id          Int      @id @default(autoincrement())
+  date        DateTime @db.Date
+  sellerId    Bytes    @map("seller_id") @db.Binary(16)
+  categoryId  Int      @map("category_id")
+  revenue              Decimal  @default(0.00) @db.Decimal(15, 2)
+  ordersCount          Int      @default(0) @map("orders_count")
+  completedOrdersCount Int      @default(0) @map("completed_orders_count")
+  cancelledOrdersCount Int      @default(0) @map("cancelled_orders_count")
+  unitsSold            Int      @default(0) @map("units_sold")
+
+  @@unique([date, sellerId, categoryId], name: "uq_daily_stats")
+  @@index([date])
+  @@index([sellerId])
+  @@index([categoryId])
+  @@map("daily_performance_stats")
+}

@@ -244,4 +244,142 @@ export class OrdersService {
         });
         return this.serializeOrder(updated);
     }
+
+    async getSellerAnalytics(sellerIdStr: string, range: string = '30d') {
+        const sellerId = uuidToBuffer(sellerIdStr);
+
+        // 1. Determine Date Ranges
+        const now = new Date();
+        now.setHours(23, 59, 59, 999); // End of today
+
+        // Default to 30 days
+        let days = 30;
+        let isMonth = false;
+
+        if (range === '7d') days = 7;
+        else if (range === '30d') days = 30;
+        else if (range === 'this_month') {
+            isMonth = true;
+            days = now.getDate(); // Days passed in current month
+        }
+
+        const currentStartDate = new Date(now.getTime() - (days - 1) * 24 * 60 * 60 * 1000);
+        currentStartDate.setHours(0, 0, 0, 0);
+
+        const previousEndDate = new Date(currentStartDate.getTime() - 1);
+        const previousStartDate = new Date(previousEndDate.getTime() - (days - 1) * 24 * 60 * 60 * 1000);
+        previousStartDate.setHours(0, 0, 0, 0);
+
+        // 2. Fetch all orders that have products belonging to this seller
+        const orders = await this.prisma.order.findMany({
+            where: {
+                isDeleted: false,
+                orderItems: {
+                    some: { product: { sellerId: sellerId } },
+                },
+                createdAt: { gte: previousStartDate }
+            },
+            include: {
+                orderItems: {
+                    include: {
+                        product: { select: { id: true, sellerId: true, name: true } },
+                    },
+                },
+            },
+            orderBy: { createdAt: 'asc' }
+        });
+
+        // 3. Initialize Data Structures
+        let currentRevenue = 0;
+        let previousRevenue = 0;
+        let currentOrdersCount = 0;
+        let previousOrdersCount = 0;
+
+        const chartDataMap = new Map<string, { sales: number, orders: number }>();
+        const topProductsMap = new Map<string, number>();
+        const orderStatusMap = new Map<string, number>();
+
+        // Pre-fill chartDataMap with zeroes for the current period
+        for (let i = days - 1; i >= 0; i--) {
+            const d = new Date(now.getTime() - i * 24 * 60 * 60 * 1000);
+            const dateStr = d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }); // e.g. "05 Mar"
+            chartDataMap.set(dateStr, { sales: 0, orders: 0 });
+        }
+
+        // 4. Process Orders
+        for (const order of orders) {
+            // Filter items to only count this seller's products
+            const sellerItems = order.orderItems.filter(
+                (item: any) => bufferToUuid(item.product.sellerId) === sellerIdStr
+            );
+            if (sellerItems.length === 0) continue;
+
+            const orderDate = new Date(order.createdAt);
+            const isCurrentPeriod = orderDate >= currentStartDate && orderDate <= now;
+            const isPreviousPeriod = orderDate >= previousStartDate && orderDate <= previousEndDate;
+
+            // Only count non-cancelled orders for Revenue calculations
+            const isNonCancelled = order.status !== OrderStatus.CANCELLED;
+            const orderRevenue = sellerItems.reduce((sum, item) => sum + (Number(item.priceAtPurchase) * item.quantity), 0);
+
+            if (isCurrentPeriod) {
+                // Main stats
+                currentOrdersCount++;
+                if (isNonCancelled) currentRevenue += orderRevenue;
+
+                // Order Status count
+                orderStatusMap.set(order.status, (orderStatusMap.get(order.status) || 0) + 1);
+
+                // Chart Data (Line Chart)
+                if (isNonCancelled) {
+                    const dateStr = orderDate.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' });
+                    if (chartDataMap.has(dateStr)) {
+                        const current = chartDataMap.get(dateStr)!;
+                        chartDataMap.set(dateStr, { sales: current.sales + orderRevenue, orders: current.orders + 1 });
+                    }
+                }
+
+                // Top Products (only non-cancelled, but counting quantities)
+                if (isNonCancelled) {
+                    for (const item of sellerItems) {
+                        const productName = item.product.name;
+                        topProductsMap.set(productName, (topProductsMap.get(productName) || 0) + item.quantity);
+                    }
+                }
+            } else if (isPreviousPeriod) {
+                // Previous stats for % comparison
+                previousOrdersCount++;
+                if (isNonCancelled) previousRevenue += orderRevenue;
+            }
+        }
+
+        // 5. Format Output
+        const chartData = Array.from(chartDataMap.entries()).map(([date, data]) => ({
+            date,
+            sales: data.sales,
+            orders: data.orders
+        }));
+
+        const topProducts = Array.from(topProductsMap.entries())
+            .map(([name, sold]) => ({ name, sold }))
+            .sort((a, b) => b.sold - a.sold)
+            .slice(0, 5); // Top 5
+
+        const orderStatusData = Array.from(orderStatusMap.entries()).map(([name, value]) => ({
+            name,
+            value
+        }));
+
+        return {
+            summary: {
+                currentRevenue,
+                previousRevenue,
+                currentOrders: currentOrdersCount,
+                previousOrders: previousOrdersCount
+            },
+            chartData,
+            topProducts,
+            orderStatusData
+        };
+    }
 }

@@ -99,9 +99,15 @@ export class UsersService {
         });
         if (!user) throw new NotFoundException('User not found');
 
+        const { address, ...userData } = dto;
+        const updateData: any = { ...userData };
+        if (address !== undefined) {
+            updateData.address = address;
+        }
+
         const updated = await this.prisma.user.update({
             where: { id: idBuf },
-            data: dto,
+            data: updateData,
             include: {
                 buyerProfile: true,
                 sellerProfile: true,

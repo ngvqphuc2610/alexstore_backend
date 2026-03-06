@@ -68,6 +68,7 @@ model User {
   email        String   @unique @db.VarChar(100)
   passwordHash String   @map("password_hash") @db.VarChar(255)
   role         Role     @default(BUYER)
+  address      String?  @db.Text
   isDeleted    Boolean  @default(false) @map("is_deleted")
   createdAt    DateTime @default(now()) @map("created_at")
   updatedAt    DateTime @updatedAt @map("updated_at")

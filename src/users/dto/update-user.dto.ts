@@ -11,4 +11,9 @@ export class UpdateUserDto {
     @IsOptional()
     @IsEmail()
     email?: string;
+
+    @ApiPropertyOptional({ example: '123 Main St, HCMC', description: 'Update buyer address' })
+    @IsOptional()
+    @IsString()
+    address?: string;
 }

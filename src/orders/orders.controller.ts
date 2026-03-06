@@ -6,6 +6,7 @@ import {
     Param,
     Body,
     UseGuards,
+    Query,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiProperty } from '@nestjs/swagger';
 import { OrdersService } from './orders.service';
@@ -60,6 +61,17 @@ export class OrdersController {
     @ApiOperation({ summary: 'Get current seller orders' })
     findSellerOrders(@CurrentUser('id') userId: string) {
         return this.ordersService.findBySeller(userId);
+    }
+
+    @Get('seller/analytics')
+    @UseGuards(RolesGuard)
+    @Roles(Role.SELLER)
+    @ApiOperation({ summary: 'Get current seller analytics data for charts' })
+    getSellerAnalytics(
+        @CurrentUser('id') userId: string,
+        @Query('range') range?: string,
+    ) {
+        return this.ordersService.getSellerAnalytics(userId, range);
     }
 
     @Get(':id')

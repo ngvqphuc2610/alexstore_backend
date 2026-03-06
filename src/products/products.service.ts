@@ -2,6 +2,7 @@ import {
     Injectable,
     NotFoundException,
     ForbiddenException,
+    BadRequestException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import {
@@ -21,18 +22,44 @@ export class ProductsService {
     constructor(private prisma: PrismaService) { }
 
     private serializeProduct(p: any) {
-        return {
+        const serialized = {
             ...p,
             id: bufferToUuid(p.id),
             sellerId: bufferToUuid(p.sellerId),
             price: Number(p.price),
             avgRating: Number(p.avgRating),
         };
+
+        if (p.images) {
+            serialized.images = p.images.map((img: any) => ({
+                ...img,
+                id: Number(img.id),
+                productId: bufferToUuid(img.productId),
+            }));
+        }
+
+        if (p.seller) {
+            serialized.seller = {
+                ...p.seller,
+                id: bufferToUuid(p.seller.id),
+            };
+        }
+
+        if (p.reviews) {
+            serialized.reviews = p.reviews.map((r: any) => ({
+                ...r,
+                id: Number(r.id),
+                productId: bufferToUuid(r.productId),
+                buyerId: bufferToUuid(r.buyerId),
+            }));
+        }
+
+        return serialized;
     }
 
     async findAll(query: {
         categoryId?: number;
-        status?: ProductStatus;
+        status?: ProductStatus | 'all';
         sellerId?: string;
         page?: number;
         limit?: number;
@@ -43,8 +70,15 @@ export class ProductsService {
 
         const where: any = { isDeleted: false };
         if (query.categoryId) where.categoryId = query.categoryId;
-        if (query.status) where.status = query.status;
-        else where.status = ProductStatus.APPROVED; // public default
+
+        if (query.status) {
+            if (query.status !== 'all') {
+                where.status = query.status;
+            }
+        } else {
+            where.status = ProductStatus.APPROVED; // public default
+        }
+
         if (query.sellerId) where.sellerId = uuidToBuffer(query.sellerId);
 
         const [items, total] = await Promise.all([
@@ -54,7 +88,7 @@ export class ProductsService {
                 take: limit,
                 orderBy: { createdAt: 'desc' },
                 include: {
-                    images: { where: { isPrimary: true }, take: 1 },
+                    images: { orderBy: { isPrimary: 'desc' }, take: 1 },
                     category: true,
                 },
             }),
@@ -81,6 +115,12 @@ export class ProductsService {
         const id = generateUuidV7();
         const sellerId = uuidToBuffer(sellerIdStr);
 
+        const imagesCreate = dto.imageUrls?.map((url, i) => ({
+            imageUrl: url,
+            isPrimary: i === 0,
+            sortOrder: i,
+        })) || [];
+
         const product = await this.prisma.product.create({
             data: {
                 id,
@@ -90,7 +130,11 @@ export class ProductsService {
                 description: dto.description,
                 price: dto.price,
                 stockQuantity: dto.stockQuantity,
+                images: {
+                    create: imagesCreate,
+                },
             },
+            include: { images: true }
         });
 
         return this.serializeProduct(product);
@@ -162,5 +206,142 @@ export class ProductsService {
         });
 
         return { message: 'Product deleted' };
+    }
+
+    async uploadImage(idStr: string, file: Express.Multer.File, userId: string, userRole: Role) {
+        const id = uuidToBuffer(idStr);
+        const product = await this.prisma.product.findFirst({
+            where: { id, isDeleted: false },
+            include: { images: true },
+        });
+
+        if (!product) {
+            throw new NotFoundException('Product not found');
+        }
+
+        if (!file) {
+            throw new BadRequestException('No file uploaded');
+        }
+
+        if (userRole === Role.SELLER && bufferToUuid(product.sellerId) !== userId) {
+            throw new ForbiddenException('Cannot modify another seller\'s product');
+        }
+
+        const isPrimary = product.images.length === 0;
+        const sortOrder = product.images.length;
+        const imageUrl = `/uploads/${file.filename}`;
+
+        const image = await this.prisma.productImage.create({
+            data: {
+                productId: id,
+                imageUrl,
+                isPrimary,
+                sortOrder,
+            },
+        });
+
+        return {
+            ...image,
+            productId: bufferToUuid(image.productId),
+            id: Number(image.id),
+        };
+    }
+
+    async removeImage(idStr: string, imageId: number, userId: string, userRole: Role) {
+        const id = uuidToBuffer(idStr);
+        const product = await this.prisma.product.findFirst({
+            where: { id, isDeleted: false },
+        });
+
+        if (!product) {
+            throw new NotFoundException('Product not found');
+        }
+
+        if (userRole === Role.SELLER && bufferToUuid(product.sellerId) !== userId) {
+            throw new ForbiddenException('Cannot modify another seller\'s product');
+        }
+
+        const image = await this.prisma.productImage.findFirst({
+            where: { id: imageId, productId: id },
+        });
+
+        if (!image) {
+            throw new NotFoundException('Image not found');
+        }
+
+        await this.prisma.productImage.delete({
+            where: { id: imageId },
+        });
+
+        return { message: 'Image deleted' };
+    }
+
+    async addImageUrl(idStr: string, imageUrl: string, userId: string, userRole: Role) {
+        const id = uuidToBuffer(idStr);
+        const product = await this.prisma.product.findFirst({
+            where: { id, isDeleted: false },
+            include: { images: true },
+        });
+
+        if (!product) {
+            throw new NotFoundException('Product not found');
+        }
+
+        if (userRole === Role.SELLER && bufferToUuid(product.sellerId) !== userId) {
+            throw new ForbiddenException('Cannot modify another seller\'s product');
+        }
+
+        const isPrimary = product.images.length === 0;
+        const sortOrder = product.images.length;
+
+        const image = await this.prisma.productImage.create({
+            data: {
+                productId: id,
+                imageUrl,
+                isPrimary,
+                sortOrder,
+            },
+        });
+
+        return {
+            ...image,
+            productId: bufferToUuid(image.productId),
+            id: Number(image.id),
+        };
+    }
+    async setPrimaryImage(idStr: string, imageId: number, userId: string, userRole: Role) {
+        const id = uuidToBuffer(idStr);
+        const product = await this.prisma.product.findFirst({
+            where: { id, isDeleted: false },
+        });
+
+        if (!product) {
+            throw new NotFoundException('Product not found');
+        }
+
+        if (userRole === Role.SELLER && bufferToUuid(product.sellerId) !== userId) {
+            throw new ForbiddenException('Cannot modify another seller\'s product');
+        }
+
+        const image = await this.prisma.productImage.findFirst({
+            where: { id: imageId, productId: id },
+        });
+
+        if (!image) {
+            throw new NotFoundException('Image not found');
+        }
+
+        await this.prisma.$transaction([
+            this.prisma.productImage.updateMany({
+                where: { productId: id, isPrimary: true },
+                data: { isPrimary: false },
+            }),
+            this.prisma.productImage.update({
+                where: { id: imageId },
+                data: { isPrimary: true },
+            }),
+        ]);
+
+        return { message: 'Primary image set successfully' };
     }
 }

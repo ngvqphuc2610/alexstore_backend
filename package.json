@@ -26,15 +26,28 @@
     "@nestjs/jwt": "^11.0.2",
     "@nestjs/passport": "^11.0.5",
     "@nestjs/platform-express": "^11.0.1",
+    "@nestjs/schedule": "^6.1.1",
+    "@nestjs/serve-static": "^5.0.4",
+    "@nestjs/swagger": "^11.2.6",
+    "@prisma/adapter-mariadb": "^7.4.2",
     "@prisma/client": "^7.4.2",
+    "@types/multer": "^2.0.0",
+    "@types/node-fetch": "^2.6.13",
     "bcrypt": "^6.0.0",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.15.1",
+    "crypto": "^1.0.1",
+    "date-fns": "^4.1.0",
     "dotenv": "^17.3.1",
+    "helmet": "^8.1.0",
+    "mysql2": "^3.18.2",
+    "node-fetch": "^2.7.0",
     "passport": "^0.7.0",
     "passport-jwt": "^4.0.1",
+    "qs": "^6.15.0",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1",
+    "swagger-ui-express": "^5.0.1",
     "uuid": "^13.0.0",
     "uuidv7": "^1.1.0"
   },
@@ -83,5 +96,8 @@
     ],
     "coverageDirectory": "../coverage",
     "testEnvironment": "node"
+  },
+  "prisma": {
+    "seed": "ts-node prisma/seed-roles.ts"
   }
 }

@@ -1,30 +1,95 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { UpdateUserDto } from './dto/update-user.dto';
-import { bufferToUuid, uuidToBuffer } from '../common/helpers/uuid.helper';
+import { CreateUserDto } from './dto/create-user.dto';
+import { bufferToUuid, uuidToBuffer, generateUuidV7 } from '../common/helpers/uuid.helper';
+import * as bcrypt from 'bcrypt';
+import { Role } from '@prisma/client';
 
 @Injectable()
 export class UsersService {
     constructor(private prisma: PrismaService) { }
+    async findAll() {
+        const users = await this.prisma.user.findMany({
+            include: {
+                buyerProfile: true,
+                sellerProfile: true,
+            },
+            orderBy: { createdAt: 'asc' },
+        });
+        return users.map(user => {
+            const { passwordHash, ...safeUser } = user;
+            return {
+                ...safeUser,
+                id: bufferToUuid(user.id),
+                profile: user.role === Role.BUYER ? user.buyerProfile : user.sellerProfile,
+            };
+        });
+    }
 
     async findById(idStr: string) {
         const idBuf = uuidToBuffer(idStr);
         const user = await this.prisma.user.findFirst({
             where: { id: idBuf, isDeleted: false },
-            select: {
-                id: true,
-                username: true,
-                email: true,
-                role: true,
-                isSellerVerified: true,
-                createdAt: true,
-                updatedAt: true,
+            include: {
+                buyerProfile: true,
+                sellerProfile: true,
             },
         });
 
         if (!user) throw new NotFoundException('User not found');
 
-        return { ...user, id: bufferToUuid(user.id) };
+        const { passwordHash, ...safeUser } = user;
+        return {
+            ...safeUser,
+            id: bufferToUuid(user.id),
+            // Simplify response based on role
+            profile: user.role === 'BUYER' ? user.buyerProfile : user.sellerProfile,
+        };
+    }
+    async create(dto: CreateUserDto) {
+        // Check uniqueness
+        const exists = await this.prisma.user.findFirst({
+            where: {
+                OR: [{ email: dto.email }, { username: dto.username }],
+            },
+        });
+        if (exists) {
+            throw new ConflictException('Email or username already taken');
+        }
+        const passwordHash = await bcrypt.hash(dto.password, 12);
+        const id = generateUuidV7();
+        const role = dto.role ?? Role.BUYER;
+        const user = await this.prisma.user.create({
+            data: {
+                id,
+                username: dto.username,
+                email: dto.email,
+                passwordHash,
+                role,
+                ...(role === Role.BUYER
+                    ? { buyerProfile: { create: {} } }
+                    : role === Role.SELLER
+                        ? {
+                            sellerProfile: {
+                                create: {
+                                    shopName: dto.shopName || `${dto.username}'s Shop`,
+                                },
+                            },
+                        }
+                        : {}),
+            },
+            include: {
+                buyerProfile: true,
+                sellerProfile: true,
+            },
+        });
+        const { passwordHash: _, ...safeUser } = user;
+        return {
+            ...safeUser,
+            id: bufferToUuid(user.id),
+            profile: role === Role.BUYER ? user.buyerProfile : user.sellerProfile,
+        };
     }
 
     async update(idStr: string, dto: UpdateUserDto) {
@@ -34,20 +99,27 @@ export class UsersService {
         });
         if (!user) throw new NotFoundException('User not found');
 
+        const { address, ...userData } = dto;
+        const updateData: any = { ...userData };
+        if (address !== undefined) {
+            updateData.address = address;
+        }
+
         const updated = await this.prisma.user.update({
             where: { id: idBuf },
-            data: dto,
-            select: {
-                id: true,
-                username: true,
-                email: true,
-                role: true,
-                isSellerVerified: true,
-                updatedAt: true,
+            data: updateData,
+            include: {
+                buyerProfile: true,
+                sellerProfile: true,
             },
         });
 
-        return { ...updated, id: bufferToUuid(updated.id) };
+        const { passwordHash, ...safeUpdated } = updated;
+        return {
+            ...safeUpdated,
+            id: bufferToUuid(updated.id),
+            profile: updated.role === 'BUYER' ? updated.buyerProfile : updated.sellerProfile,
+        };
     }
 
     async softDelete(idStr: string) {

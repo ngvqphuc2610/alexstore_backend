@@ -7,6 +7,7 @@ generator client {
 
 datasource db {
   provider = "mysql"
+  
 }
 
 // ─── Enums ───────────────────────────────────────────────────────────────────
@@ -39,27 +40,79 @@ enum PaymentStatus {
   REFUNDED
 }
 
+enum MembershipLevel {
+  NORMAL
+  SILVER
+  GOLD
+  VIP
+}
+
+enum SellerType {
+  STANDARD
+  MALL
+  PRO
+}
+
+enum SupportRequestStatus {
+  PENDING
+  IN_PROGRESS
+  RESOLVED
+  REJECTED
+}
+
 // ─── Models ──────────────────────────────────────────────────────────────────
 
 model User {
-  id               Bytes     @id @db.Binary(16)
-  username         String    @unique @db.VarChar(50)
-  email            String    @unique @db.VarChar(100)
-  passwordHash     String    @map("password_hash") @db.VarChar(255)
-  role             Role      @default(BUYER)
-  isSellerVerified Boolean   @default(false) @map("is_seller_verified")
-  isDeleted        Boolean   @default(false) @map("is_deleted")
-  createdAt        DateTime  @default(now()) @map("created_at")
-  updatedAt        DateTime  @updatedAt @map("updated_at")
+  id           Bytes    @id @db.Binary(16)
+  username     String   @unique @db.VarChar(50)
+  email        String   @unique @db.VarChar(100)
+  passwordHash String   @map("password_hash") @db.VarChar(255)
+  role         Role     @default(BUYER)
+  address      String?  @db.Text
+  isDeleted    Boolean  @default(false) @map("is_deleted")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
 
-  products Product[]
-  cart     Cart?
-  orders   Order[]
-  reviews  Review[]
+  buyerProfile  BuyerProfile?
+  sellerProfile SellerProfile?
+  products      Product[]
+  cart          Cart?
+  orders        Order[]
+  reviews         Review[]
+  supportRequests SupportRequest[]
 
   @@index([role], name: "idx_users_role")
   @@index([createdAt], name: "idx_users_created")
   @@map("users")
+}
+
+model BuyerProfile {
+  userId          Bytes           @id @map("user_id") @db.Binary(16)
+  membershipLevel MembershipLevel @default(NORMAL) @map("membership_level")
+  loyaltyPoints   Int             @default(0) @map("loyalty_points")
+  totalSpent      Decimal         @default(0.00) @map("total_spent") @db.Decimal(15, 2)
+  createdAt       DateTime        @default(now()) @map("created_at")
+  updatedAt       DateTime        @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("buyer_profiles")
+}
+
+model SellerProfile {
+  userId      Bytes      @id @map("user_id") @db.Binary(16)
+  shopName    String     @map("shop_name") @db.VarChar(100)
+  sellerType  SellerType @default(STANDARD) @map("seller_type")
+  isVerified  Boolean    @default(false) @map("is_verified")
+  taxCode     String?    @map("tax_code") @db.VarChar(50)
+  shopRating  Decimal    @default(0.00) @map("shop_rating") @db.Decimal(3, 2)
+  pickupAddress String?  @map("pickup_address") @db.Text
+  createdAt   DateTime   @default(now()) @map("created_at")
+  updatedAt   DateTime   @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("seller_profiles")
 }
 
 model Category {
@@ -69,8 +122,19 @@ model Category {
   parent   Category? @relation("CategoryToCategory", fields: [parentId], references: [id], onDelete: SetNull)
   children Category[] @relation("CategoryToCategory")
   products Product[]
+  allowedSellerTypes CategoryAllowedSellerType[]
 
   @@map("categories")
+}
+
+model CategoryAllowedSellerType {
+  id         Int        @id @default(autoincrement())
+  categoryId Int        @map("category_id")
+  sellerType SellerType @map("seller_type")
+  category   Category   @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  @@unique([categoryId, sellerType])
+  @@map("category_allowed_seller_types")
 }
 
 model Product {
@@ -194,4 +258,40 @@ model Review {
   @@unique([buyerId, productId], name: "uq_review_user_product")
   @@index([productId], name: "idx_reviews_product")
   @@map("reviews")
+}
+
+model SupportRequest {
+  id          Int                  @id @default(autoincrement())
+  userId      Bytes                @map("user_id") @db.Binary(16)
+  type        String               @db.VarChar(50) // e.g., "CATEGORY_REQ", "BUG", "TECHNICAL", "OTHER"
+  title       String               @db.VarChar(255)
+  description String               @db.Text
+  status      SupportRequestStatus @default(PENDING)
+  adminReply  String?              @map("admin_reply") @db.Text
+  createdAt   DateTime             @default(now()) @map("created_at")
+  updatedAt   DateTime             @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId], name: "idx_support_requests_user")
+  @@index([status], name: "idx_support_requests_status")
+  @@map("support_requests")
+}
+
+model DailyPerformanceStats {
+  id          Int      @id @default(autoincrement())
+  date        DateTime @db.Date
+  sellerId    Bytes    @map("seller_id") @db.Binary(16)
+  categoryId  Int      @map("category_id")
+  revenue              Decimal  @default(0.00) @db.Decimal(15, 2)
+  ordersCount          Int      @default(0) @map("orders_count")
+  completedOrdersCount Int      @default(0) @map("completed_orders_count")
+  cancelledOrdersCount Int      @default(0) @map("cancelled_orders_count")
+  unitsSold            Int      @default(0) @map("units_sold")
+
+  @@unique([date, sellerId, categoryId], name: "uq_daily_stats")
+  @@index([date])
+  @@index([sellerId])
+  @@index([categoryId])
+  @@map("daily_performance_stats")
 }

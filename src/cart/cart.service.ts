@@ -61,6 +61,11 @@ export class CartService {
                     id: bufferToUuid(item.product.id),
                     name: item.product.name,
                     price: Number(item.product.price),
+                    images: item.product.images?.map((img: any) => ({
+                        id: Number(img.id),
+                        imageUrl: img.imageUrl,
+                        isPrimary: img.isPrimary,
+                    })) || [],
                 },
             })),
         };

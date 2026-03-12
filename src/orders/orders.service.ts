@@ -96,19 +96,32 @@ export class OrdersService {
                 });
             }
 
-            // ─── Step 3: create order ─────────────────────────────────────────
+            // ─── Step 3: validate address and create order ─────────────────────
             const orderId = generateUuidV7();
             const orderCode = this.generateOrderCode();
 
+            const addressId = uuidToBuffer(dto.addressId);
+            const address = await tx.address.findFirst({
+                where: { id: addressId as any, userId: buyerId as any, isDeleted: false }
+            });
+
+            if (!address) {
+                throw new NotFoundException('Selected address not found or has been deleted');
+            }
+
+            const shippingAddressStr = `${address.addressLine}, ${address.ward}, ${address.district}, ${address.province}`;
+
             const newOrder = await tx.order.create({
                 data: {
-                    id: orderId,
+                    id: orderId as any,
                     orderCode,
-                    buyerId,
+                    buyerId: buyerId as any,
                     totalAmount,
-                    shippingAddress: dto.shippingAddress,
+                    shippingName: address.fullName,
+                    shippingPhone: address.phoneNumber,
+                    shippingAddress: shippingAddressStr,
                     paymentMethod: dto.paymentMethod,
-                },
+                } as any,
             });
 
             // ─── Step 4: create order items ───────────────────────────────────
@@ -130,14 +143,40 @@ export class OrdersService {
         return this.serializeOrder(order);
     }
 
-    async findByBuyer(buyerIdStr: string) {
+    async findByBuyer(buyerIdStr: string, params?: { status?: OrderStatus; page?: number; limit?: number; search?: string }) {
         const buyerId = uuidToBuffer(buyerIdStr);
-        const orders = await this.prisma.order.findMany({
-            where: { buyerId, isDeleted: false },
-            orderBy: { createdAt: 'desc' },
-            include: { orderItems: { include: { product: { select: { name: true } } } } },
-        });
-        return orders.map((o) => this.serializeOrder(o));
+        const { status, page = 1, limit = 10, search } = params || {};
+        const skip = (page - 1) * limit;
+
+        const where: any = { buyerId, isDeleted: false };
+        if (status) where.status = status;
+        if (search) {
+            where.OR = [
+                { orderCode: { contains: search, mode: 'insensitive' } },
+                { orderItems: { some: { product: { name: { contains: search, mode: 'insensitive' } } } } }
+            ];
+        }
+
+        const [total, orders] = await Promise.all([
+            this.prisma.order.count({ where }),
+            this.prisma.order.findMany({
+                where,
+                skip,
+                take: limit,
+                orderBy: { createdAt: 'desc' },
+                include: { orderItems: { include: { product: { select: { name: true, images: true, seller: { select: { username: true } } } } } } },
+            }),
+        ]);
+
+        return {
+            data: orders.map((o) => this.serializeOrder(o)),
+            meta: {
+                total,
+                page,
+                limit,
+                totalPages: Math.ceil(total / limit),
+            },
+        };
     }
 
     async findBySeller(sellerIdStr: string) {
@@ -182,11 +221,52 @@ export class OrdersService {
         });
     }
 
+    async findAll(params: { status?: OrderStatus; page: number; limit: number }) {
+        const { status, page, limit } = params;
+        const skip = (page - 1) * limit;
+
+        const where: any = { isDeleted: false };
+        if (status) where.status = status;
+
+        const [total, orders] = await Promise.all([
+            this.prisma.order.count({ where }),
+            this.prisma.order.findMany({
+                where,
+                skip,
+                take: limit,
+                orderBy: { createdAt: 'desc' },
+                include: {
+                    buyer: { select: { username: true, email: true } },
+                    orderItems: { include: { product: { select: { name: true } } } }
+                },
+            }),
+        ]);
+
+        return {
+            data: orders.map((o) => {
+                const serialized = this.serializeOrder(o);
+                return {
+                    ...serialized,
+                    buyer: o.buyer,
+                };
+            }),
+            meta: {
+                total,
+                page,
+                limit,
+                totalPages: Math.ceil(total / limit),
+            },
+        };
+    }
+
     async findOne(idStr: string, userId: string, userRole: Role) {
         const id = uuidToBuffer(idStr);
         const order = await this.prisma.order.findFirst({
             where: { id, isDeleted: false },
-            include: { orderItems: { include: { product: { select: { id: true, name: true } } } } },
+            include: { 
+                buyer: { select: { username: true, email: true } },
+                orderItems: { include: { product: { select: { id: true, name: true, images: true, seller: { select: { username: true } } } } } } 
+            },
         });
 
         if (!order) throw new NotFoundException('Order not found');

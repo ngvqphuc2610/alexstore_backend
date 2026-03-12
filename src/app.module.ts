@@ -15,6 +15,8 @@ import { SupportModule } from './support/support.module';
 import { PaymentModule } from './payment/payment.module';
 import { AdminAnalyticsModule } from './admin-analytics/admin-analytics.module';
 
+import { AddressesModule } from './addresses/addresses.module';
+
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
@@ -34,6 +36,7 @@ import { AdminAnalyticsModule } from './admin-analytics/admin-analytics.module';
     SupportModule,
     PaymentModule,
     AdminAnalyticsModule,
+    AddressesModule,
   ],
 })
 export class AppModule { }

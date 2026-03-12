@@ -21,6 +21,6 @@ export function bufferToUuid(input: Uint8Array | Buffer): string {
     ].join('-');
 }
 
-export function uuidToBuffer(uuid: string): Buffer {
-    return Buffer.from(uuid.replace(/-/g, ''), 'hex');
+export function uuidToBuffer(uuid: string): Uint8Array {
+    return new Uint8Array(Buffer.from(uuid.replace(/-/g, ''), 'hex'));
 }

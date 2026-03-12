@@ -51,8 +51,19 @@ export class OrdersController {
     @ApiOperation({ summary: 'Get current user orders' })
     @ApiResponse({ status: 200, description: 'Return all orders for the current user.' })
     @ApiResponse({ status: 401, description: 'Unauthorized.' })
-    findMyOrders(@CurrentUser('id') userId: string) {
-        return this.ordersService.findByBuyer(userId);
+    findMyOrders(
+        @CurrentUser('id') userId: string,
+        @Query('status') status?: OrderStatus,
+        @Query('page') page?: string,
+        @Query('limit') limit?: string,
+        @Query('search') search?: string,
+    ) {
+        return this.ordersService.findByBuyer(userId, {
+            status,
+            page: page ? Number(page) : 1,
+            limit: limit ? Number(limit) : 10,
+            search,
+        });
     }
 
     @Get('seller/all')
@@ -72,6 +83,22 @@ export class OrdersController {
         @Query('range') range?: string,
     ) {
         return this.ordersService.getSellerAnalytics(userId, range);
+    }
+
+    @Get('admin/all')
+    @UseGuards(RolesGuard)
+    @Roles(Role.ADMIN)
+    @ApiOperation({ summary: 'Get all orders in the system (Admin only)' })
+    findAllOrders(
+        @Query('status') status?: OrderStatus,
+        @Query('page') page?: string,
+        @Query('limit') limit?: string,
+    ) {
+        return this.ordersService.findAll({
+            status,
+            page: page ? Number(page) : 1,
+            limit: limit ? Number(limit) : 20,
+        });
     }
 
     @Get(':id')

@@ -9,22 +9,38 @@ import { Role } from '@prisma/client';
 @Injectable()
 export class UsersService {
     constructor(private prisma: PrismaService) { }
-    async findAll() {
-        const users = await this.prisma.user.findMany({
-            include: {
-                buyerProfile: true,
-                sellerProfile: true,
+    async findAll(page: number = 1, limit: number = 20) {
+        const skip = (page - 1) * limit;
+        const [total, users] = await Promise.all([
+            this.prisma.user.count({ where: { isDeleted: false } }),
+            this.prisma.user.findMany({
+                where: { isDeleted: false },
+                include: {
+                    buyerProfile: true,
+                    sellerProfile: true,
+                },
+                orderBy: { createdAt: 'desc' },
+                skip,
+                take: limit,
+            }),
+        ]);
+
+        return {
+            data: users.map(user => {
+                const { passwordHash, ...safeUser } = user;
+                return {
+                    ...safeUser,
+                    id: bufferToUuid(user.id),
+                    profile: user.role === Role.BUYER ? user.buyerProfile : user.sellerProfile,
+                };
+            }),
+            meta: {
+                total,
+                page,
+                limit,
+                totalPages: Math.ceil(total / limit),
             },
-            orderBy: { createdAt: 'asc' },
-        });
-        return users.map(user => {
-            const { passwordHash, ...safeUser } = user;
-            return {
-                ...safeUser,
-                id: bufferToUuid(user.id),
-                profile: user.role === Role.BUYER ? user.buyerProfile : user.sellerProfile,
-            };
-        });
+        };
     }
 
     async findById(idStr: string) {
@@ -99,10 +115,13 @@ export class UsersService {
         });
         if (!user) throw new NotFoundException('User not found');
 
-        const { address, ...userData } = dto;
+        const { address, phoneNumber, ...userData } = dto;
         const updateData: any = { ...userData };
         if (address !== undefined) {
             updateData.address = address;
+        }
+        if (phoneNumber !== undefined) {
+            updateData.phoneNumber = phoneNumber;
         }
 
         const updated = await this.prisma.user.update({

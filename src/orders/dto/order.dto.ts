@@ -14,9 +14,9 @@ export class OrderItemDto {
 }
 
 export class PlaceOrderDto {
-    @ApiProperty({ example: '123 Main St, New York, NY', description: 'Shipping address' })
+    @ApiProperty({ example: 'uuid', description: 'ID of the selected address' })
     @IsString()
-    shippingAddress: string;
+    addressId: string;
 
     @ApiProperty({ type: [OrderItemDto], description: 'Items to order' })
     @IsArray()

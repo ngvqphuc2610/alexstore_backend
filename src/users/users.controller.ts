@@ -7,6 +7,7 @@ import {
     Delete,
     Body,
     Param,
+    Query,
     UseGuards,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
@@ -32,8 +33,14 @@ export class UsersController {
     @Roles(Role.ADMIN)
     @UseGuards(RolesGuard)
     @ApiOperation({ summary: 'List all users (Admin only)' })
-    async findAll() {
-        return this.usersService.findAll();
+    async findAll(
+        @Query('page') page?: string,
+        @Query('limit') limit?: string,
+    ) {
+        return this.usersService.findAll(
+            page ? Number(page) : 1,
+            limit ? Number(limit) : 20,
+        );
     }
 
     @Post()

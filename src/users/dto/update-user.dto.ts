@@ -12,6 +12,11 @@ export class UpdateUserDto {
     @IsEmail()
     email?: string;
 
+    @ApiPropertyOptional({ example: '0901234567', description: 'Update buyer phone number' })
+    @IsOptional()
+    @IsString()
+    phoneNumber?: string;
+
     @ApiPropertyOptional({ example: '123 Main St, HCMC', description: 'Update buyer address' })
     @IsOptional()
     @IsString()

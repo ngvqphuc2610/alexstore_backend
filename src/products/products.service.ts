@@ -63,6 +63,8 @@ export class ProductsService {
         sellerId?: string;
         page?: number;
         limit?: number;
+        sortBy?: string;
+        sortOrder?: 'asc' | 'desc';
     }) {
         const page = query.page ?? 1;
         const limit = query.limit ?? 20;
@@ -81,15 +83,21 @@ export class ProductsService {
 
         if (query.sellerId) where.sellerId = uuidToBuffer(query.sellerId);
 
+        // Dynamic sorting
+        const allowedSortFields = ['createdAt', 'price', 'avgRating', 'reviewCount', 'name'];
+        const sortBy = allowedSortFields.includes(query.sortBy || '') ? query.sortBy! : 'createdAt';
+        const sortOrder = query.sortOrder === 'asc' ? 'asc' : 'desc';
+
         const [items, total] = await Promise.all([
             this.prisma.product.findMany({
                 where,
                 skip,
                 take: limit,
-                orderBy: { createdAt: 'desc' },
+                orderBy: { [sortBy]: sortOrder },
                 include: {
                     images: { orderBy: { isPrimary: 'desc' }, take: 1 },
                     category: true,
+                    seller: true,
                 },
             }),
             this.prisma.product.count({ where }),
@@ -98,6 +106,45 @@ export class ProductsService {
         return {
             data: items.map((p) => this.serializeProduct(p)),
             meta: { total, page, limit, totalPages: Math.ceil(total / limit) },
+        };
+    }
+
+    async getRecommendations(query: { categoryIds?: number[]; limit?: number }) {
+        const limit = query.limit ?? 10;
+        const categoryIds = query.categoryIds || [];
+
+        // 1. Fetch products from specified categories
+        const categoryProducts = categoryIds.length > 0 
+            ? await this.prisma.product.findMany({
+                where: { 
+                    categoryId: { in: categoryIds },
+                    status: ProductStatus.APPROVED,
+                    isDeleted: false
+                },
+                take: limit,
+                orderBy: { avgRating: 'desc' },
+                include: { images: { take: 1 }, seller: true }
+            })
+            : [];
+
+        // 2. Fetch trending products (top rated overall) as fallback/mix
+        const trendingProducts = await this.prisma.product.findMany({
+            where: { 
+                status: ProductStatus.APPROVED,
+                isDeleted: false
+            },
+            take: limit,
+            orderBy: { reviewCount: 'desc' },
+            include: { images: { take: 1 }, seller: true }
+        });
+
+        // Mix and unique
+        const combined = [...categoryProducts, ...trendingProducts];
+        const uniqueItems = Array.from(new Map(combined.map(item => [bufferToUuid(item.id), item])).values())
+            .slice(0, limit);
+
+        return {
+            data: uniqueItems.map(p => this.serializeProduct(p))
         };
     }
 

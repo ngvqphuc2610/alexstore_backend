@@ -42,6 +42,8 @@ export class ProductsController {
     @ApiQuery({ name: 'status', required: false, type: String })
     @ApiQuery({ name: 'page', required: false, type: Number })
     @ApiQuery({ name: 'limit', required: false, type: Number })
+    @ApiQuery({ name: 'sortBy', required: false, type: String })
+    @ApiQuery({ name: 'sortOrder', required: false, type: String })
     @ApiResponse({ status: 200, description: 'Return all products.' })
     findAll(
         @Query('categoryId') categoryId?: string,
@@ -49,6 +51,8 @@ export class ProductsController {
         @Query('status') status?: string,
         @Query('page') page?: string,
         @Query('limit') limit?: string,
+        @Query('sortBy') sortBy?: string,
+        @Query('sortOrder') sortOrder?: string,
     ) {
         return this.productsService.findAll({
             categoryId: categoryId ? Number(categoryId) : undefined,
@@ -56,6 +60,27 @@ export class ProductsController {
             status: status as any,
             page: page ? Number(page) : 1,
             limit: limit ? Number(limit) : 20,
+            sortBy,
+            sortOrder: sortOrder as 'asc' | 'desc' | undefined,
+        });
+    }
+
+    @Get('recommendations')
+    @ApiOperation({ summary: 'Get product recommendations' })
+    @ApiQuery({ name: 'categoryIds', required: false, type: [Number] })
+    getRecommendations(
+        @Query('categoryIds') categoryIds?: string | string[],
+        @Query('limit') limit?: number,
+    ) {
+        let ids: number[] = [];
+        if (categoryIds) {
+            ids = Array.isArray(categoryIds) 
+                ? categoryIds.map(id => Number(id))
+                : categoryIds.split(',').map(id => Number(id));
+        }
+        return this.productsService.getRecommendations({
+            categoryIds: ids,
+            limit: limit ? Number(limit) : 10,
         });
     }
 

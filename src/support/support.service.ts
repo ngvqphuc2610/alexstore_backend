@@ -3,10 +3,14 @@ import { PrismaService } from '../prisma/prisma.service';
 import { CreateSupportRequestDto, AdminReplyDto } from './dto/support.dto';
 import { bufferToUuid, uuidToBuffer } from '../common/helpers/uuid.helper';
 import { SupportRequestStatus } from '@prisma/client';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 
 @Injectable()
 export class SupportService {
-    constructor(private prisma: PrismaService) { }
+    constructor(
+        private prisma: PrismaService,
+        private eventEmitter: EventEmitter2
+    ) { }
 
     private serializeRequest(req: any) {
         return {
@@ -25,7 +29,15 @@ export class SupportService {
                 status: SupportRequestStatus.PENDING,
             },
         });
-        return this.serializeRequest(request);
+        const serialized = this.serializeRequest(request);
+
+        this.eventEmitter.emit('support.created', {
+            requestId: serialized.id,
+            title: serialized.title,
+            userId: serialized.userId
+        });
+
+        return serialized;
     }
 
     async findAllForUser(userId: string) {
@@ -77,6 +89,14 @@ export class SupportService {
                 status: dto.status,
             },
         });
-        return this.serializeRequest(updated);
+        const serialized = this.serializeRequest(updated);
+
+        this.eventEmitter.emit('support.replied', {
+            requestId: serialized.id,
+            userId: serialized.userId,
+            status: serialized.status
+        });
+
+        return serialized;
     }
 }

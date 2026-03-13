@@ -16,10 +16,14 @@ import {
     uuidToBuffer,
 } from '../common/helpers/uuid.helper';
 import { ProductStatus, Role } from '@prisma/client';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 
 @Injectable()
 export class ProductsService {
-    constructor(private prisma: PrismaService) { }
+    constructor(
+        private prisma: PrismaService,
+        private eventEmitter: EventEmitter2
+    ) { }
 
     private serializeProduct(p: any) {
         const serialized = {
@@ -184,7 +188,15 @@ export class ProductsService {
             include: { images: true }
         });
 
-        return this.serializeProduct(product);
+        const serialized = this.serializeProduct(product);
+
+        this.eventEmitter.emit('product.created', {
+            productId: serialized.id,
+            productName: serialized.name,
+            sellerIdStr: bufferToUuid(product.sellerId)
+        });
+
+        return serialized;
     }
 
     async update(idStr: string, dto: UpdateProductDto, userId: string, userRole: Role) {
@@ -215,6 +227,15 @@ export class ProductsService {
             },
         });
 
+        if (updated.stockQuantity < 5) {
+            this.eventEmitter.emit('product.low_stock', {
+                productId: bufferToUuid(updated.id),
+                productName: updated.name,
+                sellerIdStr: bufferToUuid(updated.sellerId),
+                stock: updated.stockQuantity
+            });
+        }
+
         return this.serializeProduct(updated);
     }
 
@@ -229,6 +250,20 @@ export class ProductsService {
             where: { id },
             data: { status: dto.status },
         });
+
+        if (dto.status === ProductStatus.APPROVED) {
+            this.eventEmitter.emit('product.approved', {
+                productId: bufferToUuid(updated.id),
+                productName: updated.name,
+                sellerIdStr: bufferToUuid(updated.sellerId)
+            });
+        } else if (dto.status === ProductStatus.REJECTED) {
+            this.eventEmitter.emit('product.rejected', {
+                productId: bufferToUuid(updated.id),
+                productName: updated.name,
+                sellerIdStr: bufferToUuid(updated.sellerId)
+            });
+        }
 
         return this.serializeProduct(updated);
     }

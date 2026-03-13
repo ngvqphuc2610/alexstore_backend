@@ -156,7 +156,15 @@ export class ProductsService {
         const id = uuidToBuffer(idStr);
         const product = await this.prisma.product.findFirst({
             where: { id, isDeleted: false },
-            include: { images: true, category: true, reviews: { take: 10 } },
+            include: { 
+                images: true, 
+                category: true, 
+                reviews: { 
+                    take: 10,
+                    orderBy: { createdAt: 'desc' },
+                    include: { buyer: { select: { username: true } } }
+                } 
+            },
         });
         if (!product) throw new NotFoundException('Product not found');
         return this.serializeProduct(product);

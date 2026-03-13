@@ -191,12 +191,36 @@ export class OrdersService {
                 skip,
                 take: limit,
                 orderBy: { createdAt: 'desc' },
-                include: { orderItems: { include: { product: { select: { name: true, images: true, seller: { select: { username: true } } } } } } },
+                include: { 
+                    orderItems: { 
+                        include: { 
+                            product: { 
+                                select: { 
+                                    name: true, 
+                                    images: true, 
+                                    seller: { select: { username: true } },
+                                    reviews: {
+                                        where: { buyerId: buyerId },
+                                        select: { id: true }
+                                    }
+                                } 
+                            } 
+                        } 
+                    } 
+                },
             }),
         ]);
 
         return {
-            data: orders.map((o) => this.serializeOrder(o)),
+            data: orders.map((o) => {
+                const serialized = this.serializeOrder(o);
+                // Inject hasReviewed flag for each item
+                serialized.orderItems = serialized.orderItems.map((item: any) => ({
+                    ...item,
+                    hasReviewed: (o.orderItems?.find(oi => Number(oi.id) === item.id)?.product as any)?.reviews?.length > 0
+                }));
+                return serialized;
+            }),
             meta: {
                 total,
                 page,
@@ -355,6 +379,44 @@ export class OrdersService {
             orderCode: updated.orderCode,
             buyerIdStr: bufferToUuid(updated.buyerId),
             newStatus: status
+        });
+
+        return this.serializeOrder(updated);
+    }
+
+    async confirmReceipt(idStr: string, buyerIdStr: string) {
+        const id = uuidToBuffer(idStr);
+        const buyerId = uuidToBuffer(buyerIdStr);
+
+        const order = await this.prisma.order.findUnique({
+            where: { id, isDeleted: false },
+        });
+
+        if (!order) {
+            throw new NotFoundException('Order not found');
+        }
+
+        if (bufferToUuid(order.buyerId) !== buyerIdStr) {
+            throw new ForbiddenException('Not your order');
+        }
+
+        if (!['SHIPPING', 'PAID'].includes(order.status)) {
+            throw new BadRequestException('Order cannot be confirmed');
+        }
+
+        const updated = await this.prisma.order.update({
+            where: { id },
+            data: {
+                status: 'DELIVERED',
+                deliveredAt: new Date(),
+            },
+        });
+
+        this.eventEmitter.emit('order.status_updated', {
+            orderId: idStr,
+            orderCode: updated.orderCode,
+            buyerIdStr: buyerIdStr,
+            newStatus: 'DELIVERED'
         });
 
         return this.serializeOrder(updated);

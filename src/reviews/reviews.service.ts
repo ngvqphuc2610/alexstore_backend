@@ -23,13 +23,13 @@ export class ReviewsService {
         const buyerId = uuidToBuffer(buyerIdStr);
         const productId = uuidToBuffer(dto.productId);
 
-        // Verify buyer purchased the product
+        // Verify buyer purchased the product and order is completed
         const purchased = await this.prisma.orderItem.findFirst({
             where: {
                 productId,
                 order: {
                     buyerId,
-                    status: { in: ['DELIVERED', 'PAID', 'SHIPPING'] },
+                    status: 'DELIVERED',
                     isDeleted: false,
                 },
             },

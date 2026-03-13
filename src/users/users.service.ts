@@ -5,10 +5,14 @@ import { CreateUserDto } from './dto/create-user.dto';
 import { bufferToUuid, uuidToBuffer, generateUuidV7 } from '../common/helpers/uuid.helper';
 import * as bcrypt from 'bcrypt';
 import { Role } from '@prisma/client';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 
 @Injectable()
 export class UsersService {
-    constructor(private prisma: PrismaService) { }
+    constructor(
+        private prisma: PrismaService,
+        private eventEmitter: EventEmitter2
+    ) { }
     async findAll(page: number = 1, limit: number = 20) {
         const skip = (page - 1) * limit;
         const [total, users] = await Promise.all([
@@ -101,11 +105,19 @@ export class UsersService {
             },
         });
         const { passwordHash: _, ...safeUser } = user;
-        return {
+        const serialized = {
             ...safeUser,
             id: bufferToUuid(user.id),
             profile: role === Role.BUYER ? user.buyerProfile : user.sellerProfile,
         };
+
+        this.eventEmitter.emit('user.registered', {
+            userId: serialized.id,
+            username: serialized.username,
+            role: serialized.role
+        });
+
+        return serialized;
     }
 
     async update(idStr: string, dto: UpdateUserDto) {
@@ -154,5 +166,13 @@ export class UsersService {
         });
 
         return { message: 'Account deactivated successfully' };
+    }
+
+    async findAllAdmins(): Promise<string[]> {
+        const admins = await this.prisma.user.findMany({
+            where: { role: Role.ADMIN, isDeleted: false },
+            select: { id: true },
+        });
+        return admins.map(admin => bufferToUuid(admin.id));
     }
 }

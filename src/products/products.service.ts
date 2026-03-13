@@ -16,10 +16,14 @@ import {
     uuidToBuffer,
 } from '../common/helpers/uuid.helper';
 import { ProductStatus, Role } from '@prisma/client';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 
 @Injectable()
 export class ProductsService {
-    constructor(private prisma: PrismaService) { }
+    constructor(
+        private prisma: PrismaService,
+        private eventEmitter: EventEmitter2
+    ) { }
 
     private serializeProduct(p: any) {
         const serialized = {
@@ -63,6 +67,8 @@ export class ProductsService {
         sellerId?: string;
         page?: number;
         limit?: number;
+        sortBy?: string;
+        sortOrder?: 'asc' | 'desc';
     }) {
         const page = query.page ?? 1;
         const limit = query.limit ?? 20;
@@ -81,15 +87,21 @@ export class ProductsService {
 
         if (query.sellerId) where.sellerId = uuidToBuffer(query.sellerId);
 
+        // Dynamic sorting
+        const allowedSortFields = ['createdAt', 'price', 'avgRating', 'reviewCount', 'name'];
+        const sortBy = allowedSortFields.includes(query.sortBy || '') ? query.sortBy! : 'createdAt';
+        const sortOrder = query.sortOrder === 'asc' ? 'asc' : 'desc';
+
         const [items, total] = await Promise.all([
             this.prisma.product.findMany({
                 where,
                 skip,
                 take: limit,
-                orderBy: { createdAt: 'desc' },
+                orderBy: { [sortBy]: sortOrder },
                 include: {
                     images: { orderBy: { isPrimary: 'desc' }, take: 1 },
                     category: true,
+                    seller: true,
                 },
             }),
             this.prisma.product.count({ where }),
@@ -98,6 +110,45 @@ export class ProductsService {
         return {
             data: items.map((p) => this.serializeProduct(p)),
             meta: { total, page, limit, totalPages: Math.ceil(total / limit) },
+        };
+    }
+
+    async getRecommendations(query: { categoryIds?: number[]; limit?: number }) {
+        const limit = query.limit ?? 10;
+        const categoryIds = query.categoryIds || [];
+
+        // 1. Fetch products from specified categories
+        const categoryProducts = categoryIds.length > 0 
+            ? await this.prisma.product.findMany({
+                where: { 
+                    categoryId: { in: categoryIds },
+                    status: ProductStatus.APPROVED,
+                    isDeleted: false
+                },
+                take: limit,
+                orderBy: { avgRating: 'desc' },
+                include: { images: { take: 1 }, seller: true }
+            })
+            : [];
+
+        // 2. Fetch trending products (top rated overall) as fallback/mix
+        const trendingProducts = await this.prisma.product.findMany({
+            where: { 
+                status: ProductStatus.APPROVED,
+                isDeleted: false
+            },
+            take: limit,
+            orderBy: { reviewCount: 'desc' },
+            include: { images: { take: 1 }, seller: true }
+        });
+
+        // Mix and unique
+        const combined = [...categoryProducts, ...trendingProducts];
+        const uniqueItems = Array.from(new Map(combined.map(item => [bufferToUuid(item.id), item])).values())
+            .slice(0, limit);
+
+        return {
+            data: uniqueItems.map(p => this.serializeProduct(p))
         };
     }
 
@@ -137,7 +188,15 @@ export class ProductsService {
             include: { images: true }
         });
 
-        return this.serializeProduct(product);
+        const serialized = this.serializeProduct(product);
+
+        this.eventEmitter.emit('product.created', {
+            productId: serialized.id,
+            productName: serialized.name,
+            sellerIdStr: bufferToUuid(product.sellerId)
+        });
+
+        return serialized;
     }
 
     async update(idStr: string, dto: UpdateProductDto, userId: string, userRole: Role) {
@@ -168,6 +227,15 @@ export class ProductsService {
             },
         });
 
+        if (updated.stockQuantity < 5) {
+            this.eventEmitter.emit('product.low_stock', {
+                productId: bufferToUuid(updated.id),
+                productName: updated.name,
+                sellerIdStr: bufferToUuid(updated.sellerId),
+                stock: updated.stockQuantity
+            });
+        }
+
         return this.serializeProduct(updated);
     }
 
@@ -182,6 +250,20 @@ export class ProductsService {
             where: { id },
             data: { status: dto.status },
         });
+
+        if (dto.status === ProductStatus.APPROVED) {
+            this.eventEmitter.emit('product.approved', {
+                productId: bufferToUuid(updated.id),
+                productName: updated.name,
+                sellerIdStr: bufferToUuid(updated.sellerId)
+            });
+        } else if (dto.status === ProductStatus.REJECTED) {
+            this.eventEmitter.emit('product.rejected', {
+                productId: bufferToUuid(updated.id),
+                productName: updated.name,
+                sellerIdStr: bufferToUuid(updated.sellerId)
+            });
+        }
 
         return this.serializeProduct(updated);
     }

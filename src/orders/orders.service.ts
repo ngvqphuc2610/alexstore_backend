@@ -12,10 +12,14 @@ import {
     bufferToUuid,
 } from '../common/helpers/uuid.helper';
 import { OrderStatus, Role } from '@prisma/client';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 
 @Injectable()
 export class OrdersService {
-    constructor(private prisma: PrismaService) { }
+    constructor(
+        private prisma: PrismaService,
+        private eventEmitter: EventEmitter2
+    ) { }
 
     private generateOrderCode(): string {
         const now = new Date();
@@ -136,9 +140,32 @@ export class OrdersService {
 
             return tx.order.findUnique({
                 where: { id: orderId },
-                include: { orderItems: true },
+                include: { orderItems: { include: { product: { select: { sellerId: true } } } } },
             });
         });
+
+        if (!order) {
+            throw new NotFoundException('Failed to create order');
+        }
+
+        const uniqueSellerIds = new Set<string>();
+        if (order.orderItems) {
+            for (const item of order.orderItems) {
+                if (item.product?.sellerId) {
+                    uniqueSellerIds.add(bufferToUuid(item.product.sellerId));
+                }
+            }
+        }
+
+        const orderIdStr = bufferToUuid(order.id);
+        for (const sellerIdStr of uniqueSellerIds) {
+            this.eventEmitter.emit('order.created', {
+                orderId: orderIdStr,
+                orderCode: order.orderCode,
+                buyerIdStr,
+                sellerIdStr
+            });
+        }
 
         return this.serializeOrder(order);
     }
@@ -322,6 +349,14 @@ export class OrdersService {
             where: { id },
             data: { status },
         });
+
+        this.eventEmitter.emit('order.status_updated', {
+            orderId: idStr,
+            orderCode: updated.orderCode,
+            buyerIdStr: bufferToUuid(updated.buyerId),
+            newStatus: status
+        });
+
         return this.serializeOrder(updated);
     }
 

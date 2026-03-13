@@ -141,4 +141,18 @@ export class OrdersController {
     ) {
         return this.ordersService.updateStatus(id, dto.status);
     }
+
+    @Patch(':id/confirm')
+    @UseGuards(RolesGuard)
+    @Roles(Role.BUYER)
+    @ApiOperation({ summary: 'Confirm order receipt' })
+    @ApiResponse({ status: 200, description: 'Order successfully confirmed as delivered.' })
+    @ApiResponse({ status: 401, description: 'Unauthorized.' })
+    @ApiResponse({ status: 404, description: 'Order not found.' })
+    confirmReceipt(
+        @Param('id') id: string,
+        @CurrentUser('id') userId: string,
+    ) {
+        return this.ordersService.confirmReceipt(id, userId);
+    }
 }

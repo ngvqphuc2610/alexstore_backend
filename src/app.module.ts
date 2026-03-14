@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { ThrottlerModule } from '@nestjs/throttler';
 import { ConfigModule } from '@nestjs/config';
 import { ScheduleModule } from '@nestjs/schedule';
 import { ServeStaticModule } from '@nestjs/serve-static';
@@ -19,6 +20,10 @@ import { AdminAnalyticsModule } from './admin-analytics/admin-analytics.module';
 import { AddressesModule } from './addresses/addresses.module';
 import { FavoritesModule } from './favorites/favorites.module';
 import { NotificationsModule } from './notifications/notifications.module';
+import { BullModule } from '@nestjs/bullmq';
+import { MailModule } from './mail/mail.module';
+import { BullBoardConfigModule } from './bull-board/bull-board.module';
+import { RedisModule } from './redis/redis.module';
 
 @Module({
   imports: [
@@ -29,7 +34,12 @@ import { NotificationsModule } from './notifications/notifications.module';
       rootPath: join(process.cwd(), 'uploads'),
       serveRoot: '/uploads',
     }),
+    ThrottlerModule.forRoot([{
+      ttl: 60000,
+      limit: 5,
+    }]),
     PrismaModule,
+    RedisModule,
     AuthModule,
     UsersModule,
     CategoriesModule,
@@ -43,6 +53,14 @@ import { NotificationsModule } from './notifications/notifications.module';
     AddressesModule,
     FavoritesModule,
     NotificationsModule,
+    BullModule.forRoot({
+      connection: {
+        host: process.env.REDIS_HOST || 'localhost',
+        port: parseInt(process.env.REDIS_PORT || '6379', 10)
+      }
+    }),
+    MailModule,
+    BullBoardConfigModule,
   ],
 })
 export class AppModule { }

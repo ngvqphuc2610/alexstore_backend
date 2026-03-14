@@ -113,6 +113,22 @@ export class UsersController {
         return this.usersService.rejectSeller(id);
     }
 
+    // ─── Pending Sellers (Admin) ────────────────────────────────────────────
+
+    @Get('pending-sellers')
+    @Roles(Role.ADMIN)
+    @UseGuards(RolesGuard)
+    @ApiOperation({ summary: 'List pending seller requests (Admin only)' })
+    async getPendingSellers(
+        @Query('page') page?: string,
+        @Query('limit') limit?: string,
+    ) {
+        return this.usersService.findPendingSellers(
+            page ? Number(page) : 1,
+            limit ? Number(limit) : 20,
+        );
+    }
+
     // ─── Seller Registration (Buyer → Seller) ────────────────────────────────
 
     @Post('seller/register')

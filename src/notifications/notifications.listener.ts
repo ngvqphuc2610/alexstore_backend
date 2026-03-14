@@ -3,6 +3,7 @@ import { OnEvent } from '@nestjs/event-emitter';
 import { NotificationsService } from './notifications.service';
 import { OrderStatus, Role, SupportRequestStatus } from '@prisma/client';
 import { UsersService } from '../users/users.service';
+import { MailService } from '../mail/mail.service';
 
 @Injectable()
 export class NotificationsListener {
@@ -10,7 +11,8 @@ export class NotificationsListener {
 
     constructor(
         private readonly notificationsService: NotificationsService,
-        private readonly usersService: UsersService
+        private readonly usersService: UsersService,
+        private readonly mailService: MailService
     ) { }
 
     @OnEvent('order.created')
@@ -28,6 +30,21 @@ export class NotificationsListener {
                 `Đơn hàng #${payload.orderCode} của bạn đã được đặt thành công và đang chờ người bán xác nhận.`,
                 'ORDER_CREATED'
             );
+
+            // Fetch Buyer Email
+            const buyer = await this.usersService.getUserForEmail(payload.buyerIdStr);
+            if (buyer && buyer.email && buyer.notificationSettings?.emailOrderUpdates !== false) {
+                await this.mailService.sendMail({
+                    to: buyer.email,
+                    subject: 'Xác nhận đơn hàng mới từ AlexStore',
+                    template: 'order-confirmation',
+                    context: {
+                        name: buyer.username,
+                        orderCode: payload.orderCode,
+                        title: 'Xác nhận đơn hàng'
+                    }
+                });
+            }
 
             // Notify Seller
             await this.notificationsService.createNotification(
@@ -68,6 +85,22 @@ export class NotificationsListener {
                 'ORDER_STATUS_UPDATED'
             );
             this.logger.log(`Created ORDER_STATUS_UPDATED notification for order ${payload.orderId}`);
+
+            // Fetch Buyer Email
+            const buyer = await this.usersService.getUserForEmail(payload.buyerIdStr);
+            if (buyer && buyer.email && buyer.notificationSettings?.emailOrderUpdates !== false) {
+                await this.mailService.sendMail({
+                    to: buyer.email,
+                    subject: `Cập nhật đơn hàng: ${statusText}`,
+                    template: 'order-status',
+                    context: {
+                        name: buyer.username,
+                        orderCode: payload.orderCode,
+                        status: statusText,
+                        title: 'Trạng thái đơn hàng'
+                    }
+                });
+            }
         } catch (error) {
             this.logger.error(`Failed to dispatch order.status_updated notifications: ${error.message}`);
         }

@@ -1,11 +1,18 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { RedisService } from '../redis/redis.service';
 import { CreateCategoryDto } from './dto/create-category.dto';
 import { UpdateCategoryDto } from './dto/update-category.dto';
 
+const CATEGORIES_CACHE_KEY = 'cache:categories:all';
+const CATEGORIES_CACHE_TTL = 60 * 60; // 1 hour
+
 @Injectable()
 export class CategoriesService {
-    constructor(private prisma: PrismaService) { }
+    constructor(
+        private prisma: PrismaService,
+        private redisService: RedisService,
+    ) { }
 
     async findAllForUser(userId: string, role: string) {
         if (role !== 'SELLER') return this.findAll();
@@ -22,6 +29,12 @@ export class CategoriesService {
     }
 
     async findAll(sellerType?: string) {
+        // Only cache the full list (no sellerType filter)
+        if (!sellerType) {
+            const cached = await this.redisService.getJSON(CATEGORIES_CACHE_KEY);
+            if (cached) return cached;
+        }
+
         const where: any = {};
 
         if (sellerType) {
@@ -30,7 +43,7 @@ export class CategoriesService {
             };
         }
 
-        return (this.prisma.category as any).findMany({
+        const categories = await (this.prisma.category as any).findMany({
             where,
             include: {
                 allowedSellerTypes: true,
@@ -40,6 +53,13 @@ export class CategoriesService {
             },
             orderBy: { name: 'asc' },
         });
+
+        // Cache the full list only
+        if (!sellerType) {
+            await this.redisService.setJSON(CATEGORIES_CACHE_KEY, categories, CATEGORIES_CACHE_TTL);
+        }
+
+        return categories;
     }
 
     async findOne(id: number) {
@@ -53,7 +73,7 @@ export class CategoriesService {
 
     async create(dto: CreateCategoryDto) {
         const { allowedSellerTypes, ...rest } = dto;
-        return (this.prisma.category as any).create({
+        const result = await (this.prisma.category as any).create({
             data: {
                 ...rest,
                 allowedSellerTypes: allowedSellerTypes ? {
@@ -62,6 +82,10 @@ export class CategoriesService {
             },
             include: { allowedSellerTypes: true }
         });
+
+        // Invalidate cache when categories change
+        await this.redisService.del(CATEGORIES_CACHE_KEY);
+        return result;
     }
 
     async update(id: number, dto: UpdateCategoryDto) {
@@ -75,7 +99,7 @@ export class CategoriesService {
             });
         }
 
-        return (this.prisma.category as any).update({
+        const result = await (this.prisma.category as any).update({
             where: { id },
             data: {
                 ...rest,
@@ -85,11 +109,18 @@ export class CategoriesService {
             },
             include: { allowedSellerTypes: true }
         });
+
+        // Invalidate cache when categories change
+        await this.redisService.del(CATEGORIES_CACHE_KEY);
+        return result;
     }
 
     async remove(id: number) {
         await this.findOne(id);
         await this.prisma.category.delete({ where: { id } });
+
+        // Invalidate cache when categories change
+        await this.redisService.del(CATEGORIES_CACHE_KEY);
         return { message: 'Category deleted' };
     }
 }

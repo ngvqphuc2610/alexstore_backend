@@ -126,4 +126,118 @@ export class ReviewsService {
             meta: { total, page, limit },
         };
     }
+
+    /**
+     * Admin: list ALL reviews with product name and buyer info.
+     */
+    async findAll(
+        page = 1,
+        limit = 20,
+        search?: string,
+        sortBy: string = 'newest',
+    ) {
+        const skip = (page - 1) * limit;
+
+        const where: any = {};
+        if (search) {
+            where.OR = [
+                { product: { name: { contains: search } } },
+                { buyer: { username: { contains: search } } },
+            ];
+        }
+
+        // Determine orderBy
+        let orderBy: any = { createdAt: 'desc' };
+        switch (sortBy) {
+            case 'oldest':
+                orderBy = { createdAt: 'asc' };
+                break;
+            case 'rating_high':
+                orderBy = { rating: 'desc' };
+                break;
+            case 'rating_low':
+                orderBy = { rating: 'asc' };
+                break;
+            default:
+                orderBy = { createdAt: 'desc' };
+        }
+
+        const [items, total] = await Promise.all([
+            this.prisma.review.findMany({
+                where,
+                skip,
+                take: limit,
+                orderBy,
+                include: {
+                    product: { select: { name: true } },
+                    buyer: { select: { username: true } },
+                },
+            }),
+            this.prisma.review.count({ where }),
+        ]);
+
+        // Calculate overall stats
+        const stats = await this.prisma.review.aggregate({
+            _avg: { rating: true },
+            _count: { id: true },
+        });
+
+        const positiveCount = await this.prisma.review.count({
+            where: { rating: { gte: 4 } },
+        });
+
+        return {
+            data: items.map((r) => ({
+                id: Number(r.id),
+                productName: r.product.name,
+                buyer: r.buyer.username,
+                rating: r.rating,
+                comment: r.comment,
+                createdAt: r.createdAt,
+            })),
+            meta: {
+                total,
+                page,
+                limit,
+                totalPages: Math.ceil(total / limit),
+            },
+            stats: {
+                totalReviews: stats._count.id,
+                avgRating: Math.round((stats._avg.rating ?? 0) * 10) / 10,
+                positiveCount,
+            },
+        };
+    }
+
+    /**
+     * Admin: delete a review and recalculate product stats.
+     */
+    async deleteReview(reviewId: number) {
+        const review = await this.prisma.review.findUnique({
+            where: { id: reviewId },
+        });
+        if (!review) throw new NotFoundException('Review not found');
+
+        await this.prisma.$transaction(async (tx) => {
+            // Delete the review
+            await tx.review.delete({ where: { id: reviewId } });
+
+            // Recalculate product stats
+            const stats = await tx.review.aggregate({
+                where: { productId: review.productId },
+                _avg: { rating: true },
+                _count: { id: true },
+            });
+
+            await tx.product.update({
+                where: { id: review.productId },
+                data: {
+                    avgRating: Math.round((stats._avg.rating ?? 0) * 100) / 100,
+                    reviewCount: stats._count.id,
+                },
+            });
+        });
+
+        return { message: 'Review deleted successfully' };
+    }
 }

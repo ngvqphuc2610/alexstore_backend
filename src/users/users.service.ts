@@ -200,6 +200,19 @@ export class UsersService {
 
         return { message: 'Account deactivated successfully' };
     }
+    // ─── Email Support ───────────────────────────────────────────────────────────
+
+    async getUserForEmail(userIdStr: string) {
+        try {
+            const user = await this.prisma.user.findFirst({
+                where: { id: uuidToBuffer(userIdStr), isDeleted: false },
+                include: { notificationSettings: true }
+            });
+            return user;
+        } catch {
+            return null;
+        }
+    }
 
     // ─── Ban / Unban ────────────────────────────────────────────────────────────
 
@@ -340,6 +353,40 @@ export class UsersService {
         });
 
         return { message: 'Seller has been rejected' };
+    }
+
+    async findPendingSellers(page = 1, limit = 20) {
+        const skip = (page - 1) * limit;
+
+        const where = {
+            isDeleted: false,
+            sellerProfile: {
+                verificationStatus: SellerVerificationStatus.PENDING,
+            },
+        };
+
+        const [total, users] = await Promise.all([
+            this.prisma.user.count({ where }),
+            this.prisma.user.findMany({
+                where,
+                include: { sellerProfile: true },
+                orderBy: { createdAt: 'desc' },
+                skip,
+                take: limit,
+            }),
+        ]);
+
+        return {
+            data: users.map(user => {
+                const { passwordHash, ...safeUser } = user;
+                return {
+                    ...safeUser,
+                    id: bufferToUuid(user.id),
+                    sellerProfile: user.sellerProfile,
+                };
+            }),
+            meta: { total, page, limit, totalPages: Math.ceil(total / limit) },
+        };
     }
 
     async findAllAdmins(): Promise<string[]> {

@@ -87,8 +87,12 @@ model User {
   createdAt    DateTime   @default(now()) @map("created_at")
   updatedAt    DateTime   @updatedAt @map("updated_at")
 
+  otpHash      String?    @map("otp_hash") @db.VarChar(255)
+  otpExpireAt  DateTime?  @map("otp_expire_at")
+
   buyerProfile  BuyerProfile?
   sellerProfile SellerProfile?
+  notificationSettings UserNotificationSettings?
   products      Product[]
   cart          Cart?
   orders        Order[]
@@ -102,6 +106,19 @@ model User {
   @@index([status], name: "idx_users_status")
   @@index([createdAt], name: "idx_users_created")
   @@map("users")
+}
+
+model UserNotificationSettings {
+  userId            Bytes    @id @map("user_id") @db.Binary(16)
+  emailOrderUpdates Boolean  @default(true) @map("email_order_updates")
+  emailMarketing    Boolean  @default(true) @map("email_marketing")
+  emailSellerAlerts Boolean  @default(true) @map("email_seller_alerts")
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user_notification_settings")
 }
 
 model BuyerProfile {

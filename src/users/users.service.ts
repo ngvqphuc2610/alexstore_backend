@@ -1,10 +1,11 @@
-import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
+import { Injectable, NotFoundException, ConflictException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { CreateUserDto } from './dto/create-user.dto';
+import { RegisterSellerDto } from './dto/register-seller.dto';
 import { bufferToUuid, uuidToBuffer, generateUuidV7 } from '../common/helpers/uuid.helper';
 import * as bcrypt from 'bcrypt';
-import { Role } from '@prisma/client';
+import { Role, UserStatus, SellerVerificationStatus } from '@prisma/client';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 
 @Injectable()
@@ -13,12 +14,43 @@ export class UsersService {
         private prisma: PrismaService,
         private eventEmitter: EventEmitter2
     ) { }
-    async findAll(page: number = 1, limit: number = 20) {
+
+    async findAll(
+        page: number = 1,
+        limit: number = 20,
+        role?: string,
+        status?: string,
+        keyword?: string,
+    ) {
         const skip = (page - 1) * limit;
+
+        const where: any = {};
+
+        // Filter by role
+        if (role && role !== 'all') {
+            where.role = role as Role;
+        }
+
+        // Filter by status
+        if (status && status !== 'all') {
+            where.status = status as UserStatus;
+        } else {
+            // By default, exclude DELETED users
+            where.status = { not: UserStatus.DELETED };
+        }
+
+        // Filter by keyword (username or email)
+        if (keyword) {
+            where.OR = [
+                { username: { contains: keyword } },
+                { email: { contains: keyword } },
+            ];
+        }
+
         const [total, users] = await Promise.all([
-            this.prisma.user.count({ where: { isDeleted: false } }),
+            this.prisma.user.count({ where }),
             this.prisma.user.findMany({
-                where: { isDeleted: false },
+                where,
                 include: {
                     buyerProfile: true,
                     sellerProfile: true,
@@ -87,6 +119,7 @@ export class UsersService {
                 email: dto.email,
                 passwordHash,
                 role,
+                status: UserStatus.ACTIVE,
                 ...(role === Role.BUYER
                     ? { buyerProfile: { create: {} } }
                     : role === Role.SELLER
@@ -162,10 +195,151 @@ export class UsersService {
 
         await this.prisma.user.update({
             where: { id: idBuf },
-            data: { isDeleted: true },
+            data: { isDeleted: true, status: UserStatus.DELETED },
         });
 
         return { message: 'Account deactivated successfully' };
+    }
+
+    // ─── Ban / Unban ────────────────────────────────────────────────────────────
+
+    async banUser(idStr: string) {
+        const idBuf = uuidToBuffer(idStr);
+        const user = await this.prisma.user.findFirst({
+            where: { id: idBuf, isDeleted: false },
+        });
+        if (!user) throw new NotFoundException('User not found');
+        if (user.status === UserStatus.BANNED) {
+            throw new BadRequestException('User is already banned');
+        }
+        if (user.role === Role.ADMIN) {
+            throw new BadRequestException('Cannot ban an admin user');
+        }
+
+        await this.prisma.user.update({
+            where: { id: idBuf },
+            data: { status: UserStatus.BANNED },
+        });
+
+        return { message: 'User has been banned' };
+    }
+
+    async unbanUser(idStr: string) {
+        const idBuf = uuidToBuffer(idStr);
+        const user = await this.prisma.user.findFirst({
+            where: { id: idBuf },
+        });
+        if (!user) throw new NotFoundException('User not found');
+        if (user.status !== UserStatus.BANNED) {
+            throw new BadRequestException('User is not banned');
+        }
+
+        await this.prisma.user.update({
+            where: { id: idBuf },
+            data: { status: UserStatus.ACTIVE },
+        });
+
+        return { message: 'User has been unbanned' };
+    }
+
+    // ─── Seller Verification ────────────────────────────────────────────────────
+
+    async registerSeller(userId: string, dto: RegisterSellerDto) {
+        const idBuf = uuidToBuffer(userId);
+        const user = await this.prisma.user.findFirst({
+            where: { id: idBuf, isDeleted: false },
+            include: { sellerProfile: true },
+        });
+        if (!user) throw new NotFoundException('User not found');
+
+        // Already a seller
+        if (user.role === Role.SELLER) {
+            throw new BadRequestException('Bạn đã là người bán rồi');
+        }
+
+        // Already has a pending/rejected profile
+        if (user.sellerProfile) {
+            if (user.sellerProfile.verificationStatus === SellerVerificationStatus.PENDING) {
+                throw new BadRequestException('Hồ sơ của bạn đang chờ duyệt. Vui lòng chờ quản trị viên xét duyệt.');
+            }
+            if (user.sellerProfile.verificationStatus === SellerVerificationStatus.REJECTED) {
+                // Allow re-application: update existing profile
+                await this.prisma.sellerProfile.update({
+                    where: { userId: idBuf },
+                    data: {
+                        shopName: dto.shopName,
+                        taxCode: dto.taxCode ?? null,
+                        pickupAddress: dto.pickupAddress ?? null,
+                        verificationStatus: SellerVerificationStatus.PENDING,
+                    },
+                });
+                return { message: 'Hồ sơ đã được gửi lại. Vui lòng chờ duyệt.' };
+            }
+            if (user.sellerProfile.verificationStatus === SellerVerificationStatus.APPROVED) {
+                throw new BadRequestException('Bạn đã được duyệt là người bán');
+            }
+        }
+
+        // Create new seller profile
+        await this.prisma.sellerProfile.create({
+            data: {
+                userId: idBuf,
+                shopName: dto.shopName,
+                taxCode: dto.taxCode ?? null,
+                pickupAddress: dto.pickupAddress ?? null,
+                verificationStatus: SellerVerificationStatus.PENDING,
+            },
+        });
+
+        return { message: 'Hồ sơ đăng ký người bán đã được gửi. Vui lòng chờ duyệt.' };
+    }
+
+    async approveSeller(idStr: string) {
+        const idBuf = uuidToBuffer(idStr);
+        const user = await this.prisma.user.findFirst({
+            where: { id: idBuf, isDeleted: false },
+            include: { sellerProfile: true },
+        });
+        if (!user) throw new NotFoundException('User not found');
+        if (!user.sellerProfile) throw new NotFoundException('Seller profile not found');
+        if (user.sellerProfile.verificationStatus === SellerVerificationStatus.APPROVED) {
+            throw new BadRequestException('Seller is already approved');
+        }
+
+        // Transaction: approve profile AND change role to SELLER
+        await this.prisma.$transaction([
+            this.prisma.sellerProfile.update({
+                where: { userId: idBuf },
+                data: { verificationStatus: SellerVerificationStatus.APPROVED },
+            }),
+            this.prisma.user.update({
+                where: { id: idBuf },
+                data: { role: Role.SELLER },
+            }),
+        ]);
+
+        return { message: 'Seller has been approved' };
+    }
+
+    async rejectSeller(idStr: string) {
+        const idBuf = uuidToBuffer(idStr);
+        const user = await this.prisma.user.findFirst({
+            where: { id: idBuf, isDeleted: false },
+            include: { sellerProfile: true },
+        });
+        if (!user) throw new NotFoundException('User not found');
+        if (!user.sellerProfile) throw new NotFoundException('Seller profile not found');
+        if (user.sellerProfile.verificationStatus === SellerVerificationStatus.REJECTED) {
+            throw new BadRequestException('Seller is already rejected');
+        }
+
+        // Reject: update profile status, keep role as BUYER
+        await this.prisma.sellerProfile.update({
+            where: { userId: idBuf },
+            data: { verificationStatus: SellerVerificationStatus.REJECTED },
+        });
+
+        return { message: 'Seller has been rejected' };
     }
 
     async findAllAdmins(): Promise<string[]> {

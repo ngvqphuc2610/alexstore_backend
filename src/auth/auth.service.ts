@@ -2,6 +2,7 @@ import {
     Injectable,
     ConflictException,
     UnauthorizedException,
+    ForbiddenException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
@@ -9,7 +10,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { generateUuidV7, bufferToUuid } from '../common/helpers/uuid.helper';
-import { Role } from '@prisma/client';
+import { Role, UserStatus } from '@prisma/client';
 
 @Injectable()
 export class AuthService {
@@ -76,6 +77,11 @@ export class AuthService {
 
         if (!user || user.isDeleted) {
             throw new UnauthorizedException('Invalid credentials');
+        }
+
+        // Check if user is banned
+        if (user.status === UserStatus.BANNED) {
+            throw new ForbiddenException('Tài khoản đã bị khóa. Vui lòng liên hệ quản trị viên.');
         }
 
         const valid = await bcrypt.compare(dto.password, user.passwordHash);

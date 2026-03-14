@@ -14,6 +14,7 @@ import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagg
 import { UsersService } from './users.service';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { CreateUserDto } from './dto/create-user.dto';
+import { RegisterSellerDto } from './dto/register-seller.dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
@@ -36,10 +37,16 @@ export class UsersController {
     async findAll(
         @Query('page') page?: string,
         @Query('limit') limit?: string,
+        @Query('role') role?: string,
+        @Query('status') status?: string,
+        @Query('keyword') keyword?: string,
     ) {
         return this.usersService.findAll(
             page ? Number(page) : 1,
             limit ? Number(limit) : 20,
+            role,
+            status,
+            keyword,
         );
     }
 
@@ -68,6 +75,53 @@ export class UsersController {
     @ApiOperation({ summary: 'Deactivate a user by ID (Admin only)' })
     async deleteById(@Param('id') id: string) {
         return this.usersService.softDelete(id);
+    }
+
+    // ─── Ban / Unban ──────────────────────────────────────────────────────────
+
+    @Patch(':id/ban')
+    @Roles(Role.ADMIN)
+    @UseGuards(RolesGuard)
+    @ApiOperation({ summary: 'Ban a user (Admin only)' })
+    async banUser(@Param('id') id: string) {
+        return this.usersService.banUser(id);
+    }
+
+    @Patch(':id/unban')
+    @Roles(Role.ADMIN)
+    @UseGuards(RolesGuard)
+    @ApiOperation({ summary: 'Unban a user (Admin only)' })
+    async unbanUser(@Param('id') id: string) {
+        return this.usersService.unbanUser(id);
+    }
+
+    // ─── Seller Verification ──────────────────────────────────────────────────
+
+    @Patch(':id/approve-seller')
+    @Roles(Role.ADMIN)
+    @UseGuards(RolesGuard)
+    @ApiOperation({ summary: 'Approve a seller (Admin only)' })
+    async approveSeller(@Param('id') id: string) {
+        return this.usersService.approveSeller(id);
+    }
+
+    @Patch(':id/reject-seller')
+    @Roles(Role.ADMIN)
+    @UseGuards(RolesGuard)
+    @ApiOperation({ summary: 'Reject a seller (Admin only)' })
+    async rejectSeller(@Param('id') id: string) {
+        return this.usersService.rejectSeller(id);
+    }
+
+    // ─── Seller Registration (Buyer → Seller) ────────────────────────────────
+
+    @Post('seller/register')
+    @ApiOperation({ summary: 'Register as a seller (Buyer submits application)' })
+    async registerSeller(
+        @CurrentUser('id') userId: string,
+        @Body() dto: RegisterSellerDto,
+    ) {
+        return this.usersService.registerSeller(userId, dto);
     }
 
     // ─── Profile Endpoints ────────────────────────────────────────────────────

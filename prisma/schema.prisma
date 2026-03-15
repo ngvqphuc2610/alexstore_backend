@@ -390,3 +390,18 @@ model Notification {
   @@index([createdAt], name: "idx_notifications_created")
   @@map("notifications")
 }
+
+model EmailLog {
+  id        BigInt   @id @default(autoincrement())
+  to        String   @db.VarChar(100)
+  subject   String   @db.VarChar(255)
+  template  String   @db.VarChar(50)
+  context   String?  @db.Text // JSON string of context
+  status    String   @db.VarChar(20) // "SUCCESS", "FAILED"
+  error     String?  @db.Text
+  sentAt    DateTime @default(now()) @map("sent_at")
+
+  @@index([to], name: "idx_email_logs_to")
+  @@index([sentAt], name: "idx_email_logs_sent_at")
+  @@map("email_logs")
+}

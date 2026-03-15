@@ -77,4 +77,54 @@ export class NotificationsService {
 
     return { id: Number(notification.id) };
   }
+
+  async getEmailLogs(page: number = 1, limit: number = 20) {
+    const skip = (page - 1) * limit;
+
+    const [logs, total] = await Promise.all([
+      this.prisma.emailLog.findMany({
+        orderBy: { sentAt: 'desc' },
+        skip,
+        take: limit,
+      }),
+      this.prisma.emailLog.count(),
+    ]);
+
+    return {
+      data: logs.map(log => ({
+        ...log,
+        id: log.id.toString(), // BigInt to string for JSON
+      })),
+      meta: {
+        total,
+        page,
+        lastPage: Math.ceil(total / limit),
+      }
+    };
+  }
+
+  async getSettings(userIdStr: string) {
+    const userId = uuidToBuffer(userIdStr);
+    let settings = await this.prisma.userNotificationSettings.findUnique({
+      where: { userId }
+    });
+
+    if (!settings) {
+      // Create default settings if not exists
+      settings = await this.prisma.userNotificationSettings.create({
+        data: { userId }
+      });
+    }
+
+    return settings;
+  }
+
+  async updateSettings(userIdStr: string, data: any) {
+    const userId = uuidToBuffer(userIdStr);
+    return this.prisma.userNotificationSettings.upsert({
+      where: { userId },
+      update: data,
+      create: { userId, ...data }
+    });
+  }
 }

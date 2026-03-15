@@ -3,11 +3,23 @@ import { NotificationsListener } from './notifications.listener';
 import { NotificationsService } from './notifications.service';
 import { UsersService } from '../users/users.service';
 import { OrderStatus, Role, SupportRequestStatus } from '@prisma/client';
+import { NotificationsGateway } from './notifications.gateway';
+
+// Mock the problematic mail service that imports uuid
+jest.mock('../mail/mail.service', () => ({
+    MailService: jest.fn().mockImplementation(() => ({
+        sendMail: jest.fn().mockResolvedValue({ success: true }),
+    })),
+}));
+
+import { MailService } from '../mail/mail.service';
 
 describe('NotificationsListener', () => {
     let listener: NotificationsListener;
     let mockNotificationsService: jest.Mocked<Partial<NotificationsService>>;
     let mockUsersService: jest.Mocked<Partial<UsersService>>;
+    let mockMailService: jest.Mocked<Partial<MailService>>;
+    let mockNotificationsGateway: jest.Mocked<Partial<NotificationsGateway>>;
 
     beforeEach(async () => {
         mockNotificationsService = {
@@ -15,6 +27,14 @@ describe('NotificationsListener', () => {
         };
         mockUsersService = {
             findAllAdmins: jest.fn().mockResolvedValue(['admin-uuid-1', 'admin-uuid-2']),
+            getUserForEmail: jest.fn().mockResolvedValue({ email: 'test@example.com', username: 'testuser' }),
+        };
+        mockMailService = {
+            sendMail: jest.fn().mockResolvedValue({ success: true }),
+        };
+        mockNotificationsGateway = {
+            sendToUser: jest.fn(),
+            sendToAdmins: jest.fn(),
         };
 
         const module: TestingModule = await Test.createTestingModule({
@@ -28,10 +48,16 @@ describe('NotificationsListener', () => {
                     provide: UsersService,
                     useValue: mockUsersService,
                 },
+                {
+                    provide: NotificationsGateway,
+                    useValue: mockNotificationsGateway,
+                },
+                MailService, // Use the mocked class
             ],
         }).compile();
 
         listener = module.get<NotificationsListener>(NotificationsListener);
+        mockMailService = module.get(MailService);
     });
 
     it('should be defined', () => {
@@ -137,5 +163,48 @@ describe('NotificationsListener', () => {
             expect.stringContaining('CoolSeller'),
             'NEW_SELLER_REGISTRATION'
         );
+        expect(mockMailService.sendMail).toHaveBeenCalled();
+    });
+
+    it('should handle seller.requested event', async () => {
+        const payload = { userId: 'user-123', shopName: 'MyBrand' };
+        await listener.handleSellerRequested(payload);
+        expect(mockNotificationsService.createNotification).toHaveBeenCalledWith(
+            'admin-uuid-1',
+            'Yêu cầu mở Shop mới',
+            expect.stringContaining('MyBrand'),
+            'SELLER_REQUEST_PENDING'
+        );
+        expect(mockMailService.sendMail).toHaveBeenCalledWith(expect.objectContaining({
+            template: 'admin-new-seller'
+        }));
+    });
+
+    it('should handle seller.approved event', async () => {
+        const payload = { userId: 'user-123', shopName: 'MyBrand', username: 'seller1' };
+        await listener.handleSellerApproved(payload);
+        expect(mockNotificationsService.createNotification).toHaveBeenCalledWith(
+            'user-123',
+            expect.stringContaining('được duyệt'),
+            expect.any(String),
+            'SELLER_APPROVED'
+        );
+        expect(mockMailService.sendMail).toHaveBeenCalledWith(expect.objectContaining({
+            template: 'seller-approved'
+        }));
+    });
+
+    it('should handle seller.rejected event', async () => {
+        const payload = { userId: 'user-123', shopName: 'MyBrand', username: 'seller1', reason: 'Invalid info' };
+        await listener.handleSellerRejected(payload);
+        expect(mockNotificationsService.createNotification).toHaveBeenCalledWith(
+            'user-123',
+            expect.stringContaining('bị từ chối'),
+            expect.any(String),
+            'SELLER_REJECTED'
+        );
+        expect(mockMailService.sendMail).toHaveBeenCalledWith(expect.objectContaining({
+            template: 'seller-rejected'
+        }));
     });
 });

@@ -304,6 +304,18 @@ export class UsersService {
             },
         });
 
+        const serialized = {
+            id: userId,
+            shopName: dto.shopName,
+            taxCode: dto.taxCode,
+            pickupAddress: dto.pickupAddress,
+        };
+
+        this.eventEmitter.emit('seller.requested', {
+            userId: serialized.id,
+            shopName: serialized.shopName,
+        });
+
         return { message: 'Hồ sơ đăng ký người bán đã được gửi. Vui lòng chờ duyệt.' };
     }
 
@@ -331,6 +343,12 @@ export class UsersService {
             }),
         ]);
 
+        this.eventEmitter.emit('seller.approved', {
+            userId: idStr,
+            shopName: user.sellerProfile.shopName,
+            username: user.username,
+        });
+
         return { message: 'Seller has been approved' };
     }
 
@@ -352,24 +370,49 @@ export class UsersService {
             data: { verificationStatus: SellerVerificationStatus.REJECTED },
         });
 
+        this.eventEmitter.emit('seller.rejected', {
+            userId: idStr,
+            shopName: user.sellerProfile.shopName,
+            username: user.username,
+        });
+
         return { message: 'Seller has been rejected' };
     }
 
     async findPendingSellers(page = 1, limit = 20) {
         const skip = (page - 1) * limit;
 
+        // DEBUG COUNTS
+        const [allProfiles, pendingOnly, filtered] = await Promise.all([
+            this.prisma.sellerProfile.count(),
+            this.prisma.sellerProfile.count({ where: { verificationStatus: SellerVerificationStatus.PENDING } }),
+            this.prisma.sellerProfile.count({ 
+                where: { 
+                    verificationStatus: SellerVerificationStatus.PENDING,
+                    user: { isDeleted: false }
+                } 
+            }),
+        ]);
+
+        // DEBUG COUNTS TO FILE (Use absolute path to be sure)
+        const fs = require('fs');
+        const path = require('path');
+        const logFile = path.resolve(process.cwd(), 'debug_db.log');
+        const logMsg = `[${new Date().toISOString()}] findPendingSellers Counts: all=${allProfiles}, pending=${pendingOnly}, filtered=${filtered}\n`;
+        fs.appendFileSync(logFile, logMsg);
+
         const where = {
-            isDeleted: false,
-            sellerProfile: {
-                verificationStatus: SellerVerificationStatus.PENDING,
+            verificationStatus: SellerVerificationStatus.PENDING,
+            user: {
+                isDeleted: false,
             },
         };
 
-        const [total, users] = await Promise.all([
-            this.prisma.user.count({ where }),
-            this.prisma.user.findMany({
+        const [total, profiles] = await Promise.all([
+            this.prisma.sellerProfile.count({ where }),
+            this.prisma.sellerProfile.findMany({
                 where,
-                include: { sellerProfile: true },
+                include: { user: true },
                 orderBy: { createdAt: 'desc' },
                 skip,
                 take: limit,
@@ -377,12 +420,12 @@ export class UsersService {
         ]);
 
         return {
-            data: users.map(user => {
-                const { passwordHash, ...safeUser } = user;
+            data: profiles.map(profile => {
+                const { passwordHash, ...safeUser } = profile.user;
                 return {
                     ...safeUser,
-                    id: bufferToUuid(user.id),
-                    sellerProfile: user.sellerProfile,
+                    id: bufferToUuid(profile.user.id),
+                    sellerProfile: profile,
                 };
             }),
             meta: { total, page, limit, totalPages: Math.ceil(total / limit) },

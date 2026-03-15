@@ -9,7 +9,7 @@ import { BullMQAdapter } from '@bull-board/api/bullMQAdapter';
       route: '/admin/queues',
       adapter: ExpressAdapter,
     }),
-    // Register all queues to be monitored
+
     BullBoardModule.forFeature({
       name: 'mail',
       adapter: BullMQAdapter,
@@ -24,4 +24,4 @@ import { BullMQAdapter } from '@bull-board/api/bullMQAdapter';
     }),
   ],
 })
-export class BullBoardConfigModule {}
+export class BullBoardConfigModule { }

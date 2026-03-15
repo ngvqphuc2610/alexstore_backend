@@ -49,18 +49,31 @@ export class AdminAnalyticsService {
 
     async getRevenueAnalytics(range: string = '30d', sellerId?: string, categoryId?: string, from?: string, to?: string) {
         const { startDate, endDate, days } = this.getDateRange(range, from, to);
-        const sellerBuffer = sellerId ? Buffer.from(sellerId.replace(/-/g, ''), 'hex') : null;
+        const sellerBuffer = sellerId ? uuidToBuffer(sellerId) : null;
         const catId = categoryId ? parseInt(categoryId) : null;
 
         const where: any = {
-            date: { gte: startDate, lte: endDate }
+            createdAt: { gte: startDate, lte: endDate },
+            status: { not: OrderStatus.CANCELLED },
+            isDeleted: false,
         };
-        if (sellerBuffer) where.sellerId = sellerBuffer;
-        if (catId && !isNaN(catId)) where.categoryId = catId;
 
-        const stats = await (this.prisma as any).dailyPerformanceStats.findMany({
+        if (sellerBuffer || (catId !== null && !isNaN(catId))) {
+            where.orderItems = {
+                some: {
+                    product: {
+                        ...(sellerBuffer ? { sellerId: sellerBuffer } : {}),
+                        ...(catId !== null && !isNaN(catId) ? { categoryId: catId } : {})
+                    }
+                }
+            };
+        }
+
+        const orders = await this.prisma.order.findMany({
             where,
-            orderBy: { date: 'asc' }
+            include: {
+                orderItems: { include: { product: { select: { sellerId: true, categoryId: true } } } }
+            }
         });
 
         const revenueMap = new Map<string, number>();
@@ -71,11 +84,25 @@ export class AdminAnalyticsService {
         }
 
         let totalRevenue = 0;
-        for (const s of stats) {
-            const dateStr = new Date(s.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' });
-            const rev = Number(s.revenue);
-            totalRevenue += rev;
-            revenueMap.set(dateStr, (revenueMap.get(dateStr) || 0) + rev);
+        for (const order of orders) {
+            const dateStr = new Date(order.createdAt).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' });
+            
+            let orderRevenue = 0;
+            for (const item of order.orderItems) {
+                // Apply filters per item if needed
+                const itemSellerId = bufferToUuid(item.product.sellerId);
+                if (sellerId && itemSellerId !== sellerId) continue;
+                if (catId !== null && !isNaN(catId) && item.product.categoryId !== catId) continue;
+
+                orderRevenue += Number(item.priceAtPurchase) * item.quantity;
+            }
+
+            if (orderRevenue > 0) {
+                totalRevenue += orderRevenue;
+                if (revenueMap.has(dateStr)) {
+                    revenueMap.set(dateStr, revenueMap.get(dateStr)! + orderRevenue);
+                }
+            }
         }
 
         const revenueByDate = Array.from(revenueMap.entries()).map(([date, revenue]) => ({ date, revenue }));
@@ -84,18 +111,30 @@ export class AdminAnalyticsService {
 
     async getOrdersAnalytics(range: string = '30d', sellerId?: string, categoryId?: string, from?: string, to?: string) {
         const { startDate, endDate, days } = this.getDateRange(range, from, to);
-        const sellerBuffer = sellerId ? Buffer.from(sellerId.replace(/-/g, ''), 'hex') : null;
+        const sellerBuffer = sellerId ? uuidToBuffer(sellerId) : null;
         const catId = categoryId ? parseInt(categoryId) : null;
 
         const where: any = {
-            date: { gte: startDate, lte: endDate }
+            createdAt: { gte: startDate, lte: endDate },
+            isDeleted: false,
         };
-        if (sellerBuffer) where.sellerId = sellerBuffer;
-        if (catId && !isNaN(catId)) where.categoryId = catId;
 
-        const stats = await (this.prisma as any).dailyPerformanceStats.findMany({
+        if (sellerBuffer || (catId !== null && !isNaN(catId))) {
+            where.orderItems = {
+                some: {
+                    product: {
+                        ...(sellerBuffer ? { sellerId: sellerBuffer } : {}),
+                        ...(catId !== null && !isNaN(catId) ? { categoryId: catId } : {})
+                    }
+                }
+            };
+        }
+
+        const orders = await this.prisma.order.findMany({
             where,
-            orderBy: { date: 'asc' }
+            include: {
+                orderItems: { include: { product: { select: { sellerId: true, categoryId: true } } } }
+            }
         });
 
         const ordersTrendMap = new Map<string, number>();
@@ -108,12 +147,29 @@ export class AdminAnalyticsService {
         let totalOrders = 0;
         let completedOrders = 0;
         let cancelledOrders = 0;
-        for (const s of stats) {
-            const dateStr = new Date(s.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' });
-            totalOrders += s.ordersCount;
-            completedOrders += s.completedOrdersCount || 0;
-            cancelledOrders += s.cancelledOrdersCount || 0;
-            ordersTrendMap.set(dateStr, (ordersTrendMap.get(dateStr) || 0) + s.ordersCount);
+
+        for (const order of orders) {
+            // Check if order has valid items for the filter
+            let isValid = true;
+            if (sellerId || (catId !== null && !isNaN(catId))) {
+                isValid = order.orderItems.some(item => {
+                    const itemSellerId = bufferToUuid(item.product.sellerId);
+                    if (sellerId && itemSellerId !== sellerId) return false;
+                    if (catId !== null && !isNaN(catId) && item.product.categoryId !== catId) return false;
+                    return true;
+                });
+            }
+
+            if (!isValid) continue;
+
+            totalOrders++;
+            if (order.status === OrderStatus.DELIVERED) completedOrders++;
+            if (order.status === OrderStatus.CANCELLED) cancelledOrders++;
+
+            const dateStr = new Date(order.createdAt).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' });
+            if (ordersTrendMap.has(dateStr)) {
+                ordersTrendMap.set(dateStr, ordersTrendMap.get(dateStr)! + 1);
+            }
         }
 
         const ordersByDate = Array.from(ordersTrendMap.entries()).map(([date, orders]) => ({ date, orders }));
@@ -132,32 +188,48 @@ export class AdminAnalyticsService {
         const catId = categoryId ? parseInt(categoryId) : null;
 
         const where: any = {
-            date: { gte: startDate, lte: endDate }
+            createdAt: { gte: startDate, lte: endDate },
+            status: { not: OrderStatus.CANCELLED },
+            isDeleted: false,
         };
-        if (sellerBuffer) where.sellerId = sellerBuffer;
-        if (catId && !isNaN(catId)) where.categoryId = catId;
 
-        const [totalSellers, stats] = await Promise.all([
+        if (sellerBuffer || (catId !== null && !isNaN(catId))) {
+            where.orderItems = {
+                some: {
+                    product: {
+                        ...(sellerBuffer ? { sellerId: sellerBuffer } : {}),
+                        ...(catId !== null && !isNaN(catId) ? { categoryId: catId } : {})
+                    }
+                }
+            };
+        }
+
+        const [totalSellers, orders] = await Promise.all([
             this.prisma.user.count({ where: { role: Role.SELLER, isDeleted: false } }),
-            (this.prisma as any).dailyPerformanceStats.findMany({
+            this.prisma.order.findMany({
                 where,
                 include: {
-                    // This is optional if we store shop names, but for now we join
+                    orderItems: { include: { product: { select: { sellerId: true, categoryId: true } } } }
                 }
             })
         ]);
 
-        const sellerStatsMap = new Map<string, { revenue: number, orders: number, products: number }>();
-        const activeSellersSet = new Set<string>();
+        const sellerStatsMap = new Map<string, { revenue: number, orders: Set<string>, products: number }>();
 
-        for (const s of stats) {
-            const sid = Buffer.from(s.sellerId as any).toString('hex');
-            activeSellersSet.add(sid);
-            const current = sellerStatsMap.get(sid) || { revenue: 0, orders: 0, products: 0 };
-            current.revenue += Number(s.revenue);
-            current.orders += s.ordersCount;
-            current.products += s.unitsSold;
-            sellerStatsMap.set(sid, current);
+        for (const order of orders) {
+            const orderIdStr = bufferToUuid(order.id);
+            for (const item of order.orderItems) {
+                const itemSellerId = bufferToUuid(item.product.sellerId);
+                
+                if (sellerId && itemSellerId !== sellerId) continue;
+                if (catId !== null && !isNaN(catId) && item.product.categoryId !== catId) continue;
+
+                const current = sellerStatsMap.get(itemSellerId) || { revenue: 0, orders: new Set<string>(), products: 0 };
+                current.revenue += Number(item.priceAtPurchase) * item.quantity;
+                current.orders.add(orderIdStr);
+                current.products += item.quantity;
+                sellerStatsMap.set(itemSellerId, current);
+            }
         }
 
         const totalActiveSellers = sellerStatsMap.size;
@@ -169,20 +241,17 @@ export class AdminAnalyticsService {
 
         const topSellers = await Promise.all(sortedSellers.map(async ([sid, stats]) => {
             const seller = await this.prisma.user.findUnique({
-                where: { id: Buffer.from(sid, 'hex') },
+                where: { id: uuidToBuffer(sid) as any },
                 select: {
                     username: true,
                     sellerProfile: { select: { shopName: true } }
                 }
             });
-            if (!seller) {
-                console.log(`[DEBUG] Seller not found for sid hex: ${sid}`);
-            }
             return {
-                id: bufferToUuid(Buffer.from(sid, 'hex')),
-                username: seller?.sellerProfile?.shopName || seller?.username || 'Unknown',
+                id: sid,
+                username: (seller as any)?.sellerProfile?.shopName || seller?.username || 'Unknown',
                 revenue: stats.revenue,
-                totalOrders: stats.orders,
+                totalOrders: stats.orders.size,
                 totalProducts: stats.products
             };
         }));
@@ -190,7 +259,7 @@ export class AdminAnalyticsService {
         return {
             totalSellers,
             activeSellers: totalActiveSellers,
-            newSellersThisMonth: 0, // Simplified for now
+            newSellersThisMonth: 0,
             topSellers,
             pagination: {
                 total: totalActiveSellers,
@@ -208,44 +277,31 @@ export class AdminAnalyticsService {
         const whereProduct: any = { isDeleted: false };
         if (catId && !isNaN(catId)) whereProduct.categoryId = catId;
 
-        const whereStats: any = { date: { gte: startDate, lte: endDate } };
-        if (catId && !isNaN(catId)) whereStats.categoryId = catId;
-
-        const [totalProducts, activeProducts, outOfStockProducts, stats] = await Promise.all([
+        const [totalProducts, activeProducts, outOfStockProducts, orderItems] = await Promise.all([
             this.prisma.product.count({ where: whereProduct }),
             this.prisma.product.count({ where: { ...whereProduct, status: ProductStatus.APPROVED } }),
             this.prisma.product.count({ where: { ...whereProduct, stockQuantity: 0 } }),
-            (this.prisma as any).dailyPerformanceStats.findMany({ where: whereStats })
+            this.prisma.orderItem.findMany({
+                where: {
+                    ...(catId && !isNaN(catId) ? { product: { categoryId: catId } } : {}),
+                    order: {
+                        createdAt: { gte: startDate, lte: endDate },
+                        status: { not: OrderStatus.CANCELLED },
+                        isDeleted: false
+                    }
+                },
+                select: {
+                    productId: true,
+                    quantity: true,
+                    priceAtPurchase: true
+                }
+            })
         ]);
 
         const productStatsMap = new Map<string, { sold: number, revenue: number }>();
-        // Note: For product level pre-aggregation, we might need a separate ProductStats table
-        // For now, we reuse the daily stats which are split by seller+category.
-        // This won't give individual products. So for products, we actually still need the real-time query
-        // OR we use the DailyPerformanceStats but we'd need productId as a dimension.
-
-        // FOR NOW: Let's keep Product analytics real-time because products change too often
-        // and usually there are many products, so a DailyProductStats table would be huge.
-        // BUT we'll use the stats table for the OVERVIEW metrics if possible.
-
-        // Actually, let's revert Products to real-time but optimize the query.
-        const orderItems = await this.prisma.orderItem.findMany({
-            where: {
-                ...(catId && !isNaN(catId) ? { product: { categoryId: catId } } : {}),
-                order: {
-                    createdAt: { gte: startDate, lte: endDate },
-                    status: { not: OrderStatus.CANCELLED }
-                }
-            },
-            select: {
-                productId: true,
-                quantity: true,
-                priceAtPurchase: true
-            }
-        });
 
         for (const item of orderItems) {
-            const pid = Buffer.from(item.productId as any).toString('hex');
+            const pid = bufferToUuid(item.productId);
             const stats = productStatsMap.get(pid) || { sold: 0, revenue: 0 };
             stats.sold += item.quantity;
             stats.revenue += Number(item.priceAtPurchase) * item.quantity;
@@ -261,11 +317,11 @@ export class AdminAnalyticsService {
 
         const topProducts = await Promise.all(sortedProducts.map(async ([pid, stats]) => {
             const product = await this.prisma.product.findUnique({
-                where: { id: Buffer.from(pid, 'hex') },
+                where: { id: uuidToBuffer(pid) as any },
                 select: { name: true }
             });
             return {
-                id: bufferToUuid(Buffer.from(pid, 'hex')),
+                id: pid,
                 name: product?.name || 'Unknown',
                 sold: stats.sold,
                 revenue: stats.revenue

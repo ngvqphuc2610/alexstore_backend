@@ -3,8 +3,12 @@ import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagg
 import { AuthService } from './auth.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
+import { ForgotPasswordDto } from './dto/forgot-password.dto';
+import { VerifyOtpDto } from './dto/verify-otp.dto';
+import { ResetPasswordDto } from './dto/reset-password.dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { ThrottlerGuard } from '@nestjs/throttler';
 import { UsersService } from '../users/users.service';
 
 @ApiTags('Auth')
@@ -40,5 +44,35 @@ export class AuthController {
     @ApiResponse({ status: 401, description: 'Unauthorized.' })
     async getProfile(@CurrentUser('id') userId: string) {
         return this.usersService.findById(userId);
+    }
+
+    @Post('forgot-password')
+    @UseGuards(ThrottlerGuard)
+    @HttpCode(HttpStatus.OK)
+    @ApiOperation({ summary: 'Request password reset OTP' })
+    @ApiResponse({ status: 200, description: 'OTP sent if email exists.' })
+    @ApiResponse({ status: 429, description: 'Too many requests.' })
+    async forgotPassword(@Body() dto: ForgotPasswordDto) {
+        return this.authService.forgotPassword(dto);
+    }
+
+    @Post('verify-otp')
+    @UseGuards(ThrottlerGuard)
+    @HttpCode(HttpStatus.OK)
+    @ApiOperation({ summary: 'Verify OTP code' })
+    @ApiResponse({ status: 200, description: 'OTP verified successfully.' })
+    @ApiResponse({ status: 401, description: 'Invalid or expired OTP.' })
+    async verifyOtp(@Body() dto: VerifyOtpDto) {
+        return this.authService.verifyOtp(dto);
+    }
+
+    @Post('reset-password')
+    @UseGuards(ThrottlerGuard)
+    @HttpCode(HttpStatus.OK)
+    @ApiOperation({ summary: 'Reset password using OTP' })
+    @ApiResponse({ status: 200, description: 'Password reset successfully.' })
+    @ApiResponse({ status: 401, description: 'Invalid or expired OTP.' })
+    async resetPassword(@Body() dto: ResetPasswordDto) {
+        return this.authService.resetPassword(dto);
     }
 }

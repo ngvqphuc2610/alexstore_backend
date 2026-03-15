@@ -60,22 +60,39 @@ enum SupportRequestStatus {
   REJECTED
 }
 
+enum UserStatus {
+  ACTIVE
+  BANNED
+  DELETED
+}
+
+enum SellerVerificationStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
 // ─── Models ──────────────────────────────────────────────────────────────────
 
 model User {
-  id           Bytes    @id @db.Binary(16)
-  username     String   @unique @db.VarChar(50)
-  email        String   @unique @db.VarChar(100)
-  passwordHash String   @map("password_hash") @db.VarChar(255)
-  role         Role     @default(BUYER)
-  phoneNumber  String?  @map("phone_number") @db.VarChar(20)
-  address      String?  @db.Text
-  isDeleted    Boolean  @default(false) @map("is_deleted")
-  createdAt    DateTime @default(now()) @map("created_at")
-  updatedAt    DateTime @updatedAt @map("updated_at")
+  id           Bytes      @id @db.Binary(16)
+  username     String     @unique @db.VarChar(50)
+  email        String     @unique @db.VarChar(100)
+  passwordHash String     @map("password_hash") @db.VarChar(255)
+  role         Role       @default(BUYER)
+  status       UserStatus @default(ACTIVE)
+  phoneNumber  String?    @map("phone_number") @db.VarChar(20)
+  address      String?    @db.Text
+  isDeleted    Boolean    @default(false) @map("is_deleted")
+  createdAt    DateTime   @default(now()) @map("created_at")
+  updatedAt    DateTime   @updatedAt @map("updated_at")
+
+  otpHash      String?    @map("otp_hash") @db.VarChar(255)
+  otpExpireAt  DateTime?  @map("otp_expire_at")
 
   buyerProfile  BuyerProfile?
   sellerProfile SellerProfile?
+  notificationSettings UserNotificationSettings?
   products      Product[]
   cart          Cart?
   orders        Order[]
@@ -86,8 +103,22 @@ model User {
   notifications Notification[]
 
   @@index([role], name: "idx_users_role")
+  @@index([status], name: "idx_users_status")
   @@index([createdAt], name: "idx_users_created")
   @@map("users")
+}
+
+model UserNotificationSettings {
+  userId            Bytes    @id @map("user_id") @db.Binary(16)
+  emailOrderUpdates Boolean  @default(true) @map("email_order_updates")
+  emailMarketing    Boolean  @default(true) @map("email_marketing")
+  emailSellerAlerts Boolean  @default(true) @map("email_seller_alerts")
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user_notification_settings")
 }
 
 model BuyerProfile {
@@ -104,15 +135,15 @@ model BuyerProfile {
 }
 
 model SellerProfile {
-  userId      Bytes      @id @map("user_id") @db.Binary(16)
-  shopName    String     @map("shop_name") @db.VarChar(100)
-  sellerType  SellerType @default(STANDARD) @map("seller_type")
-  isVerified  Boolean    @default(false) @map("is_verified")
-  taxCode     String?    @map("tax_code") @db.VarChar(50)
-  shopRating  Decimal    @default(0.00) @map("shop_rating") @db.Decimal(3, 2)
-  pickupAddress String?  @map("pickup_address") @db.Text
-  createdAt   DateTime   @default(now()) @map("created_at")
-  updatedAt   DateTime   @updatedAt @map("updated_at")
+  userId             Bytes                    @id @map("user_id") @db.Binary(16)
+  shopName           String                   @map("shop_name") @db.VarChar(100)
+  sellerType         SellerType               @default(STANDARD) @map("seller_type")
+  verificationStatus SellerVerificationStatus @default(PENDING) @map("verification_status")
+  taxCode            String?                  @map("tax_code") @db.VarChar(50)
+  shopRating         Decimal                  @default(0.00) @map("shop_rating") @db.Decimal(3, 2)
+  pickupAddress      String?                  @map("pickup_address") @db.Text
+  createdAt          DateTime                 @default(now()) @map("created_at")
+  updatedAt          DateTime                 @updatedAt @map("updated_at")
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -358,4 +389,19 @@ model Notification {
   @@index([isRead], name: "idx_notifications_is_read")
   @@index([createdAt], name: "idx_notifications_created")
   @@map("notifications")
+}
+
+model EmailLog {
+  id        BigInt   @id @default(autoincrement())
+  to        String   @db.VarChar(100)
+  subject   String   @db.VarChar(255)
+  template  String   @db.VarChar(50)
+  context   String?  @db.Text // JSON string of context
+  status    String   @db.VarChar(20) // "SUCCESS", "FAILED"
+  error     String?  @db.Text
+  sentAt    DateTime @default(now()) @map("sent_at")
+
+  @@index([to], name: "idx_email_logs_to")
+  @@index([sentAt], name: "idx_email_logs_sent_at")
+  @@map("email_logs")
 }

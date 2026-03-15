@@ -2,7 +2,9 @@ import {
     Controller,
     Get,
     Post,
+    Delete,
     Body,
+    Param,
     Query,
     UseGuards,
 } from '@nestjs/common';
@@ -21,20 +23,34 @@ export class ReviewsController {
     constructor(private readonly reviewsService: ReviewsService) { }
 
     @Get()
-    @ApiOperation({ summary: 'Get reviews for a product' })
-    @ApiQuery({ name: 'productId', required: true, type: String })
+    @ApiOperation({ summary: 'Get reviews (by product or all for admin)' })
+    @ApiQuery({ name: 'productId', required: false, type: String })
     @ApiQuery({ name: 'page', required: false, type: Number })
     @ApiQuery({ name: 'limit', required: false, type: Number })
-    @ApiResponse({ status: 200, description: 'Return reviews for the product.' })
-    findByProduct(
-        @Query('productId') productId: string,
+    @ApiQuery({ name: 'search', required: false, type: String })
+    @ApiQuery({ name: 'sortBy', required: false, type: String, description: 'newest | oldest | rating_high | rating_low' })
+    @ApiResponse({ status: 200, description: 'Return reviews.' })
+    findReviews(
+        @Query('productId') productId?: string,
         @Query('page') page?: string,
         @Query('limit') limit?: string,
+        @Query('search') search?: string,
+        @Query('sortBy') sortBy?: string,
     ) {
-        return this.reviewsService.findByProduct(
-            productId,
+        // If productId is provided, return reviews for that product
+        if (productId) {
+            return this.reviewsService.findByProduct(
+                productId,
+                page ? Number(page) : 1,
+                limit ? Number(limit) : 20,
+            );
+        }
+        // Otherwise return all reviews (admin use case)
+        return this.reviewsService.findAll(
             page ? Number(page) : 1,
             limit ? Number(limit) : 20,
+            search,
+            sortBy,
         );
     }
 
@@ -51,5 +67,15 @@ export class ReviewsController {
         @Body() dto: CreateReviewDto,
     ) {
         return this.reviewsService.submitReview(userId, dto);
+    }
+
+    @Delete(':id')
+    @ApiBearerAuth()
+    @UseGuards(JwtAuthGuard, RolesGuard)
+    @Roles(Role.ADMIN)
+    @ApiOperation({ summary: 'Delete a review (Admin only)' })
+    @ApiResponse({ status: 200, description: 'Review deleted.' })
+    async deleteReview(@Param('id') id: string) {
+        return this.reviewsService.deleteReview(Number(id));
     }
 }

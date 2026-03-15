@@ -13,12 +13,17 @@ import {
 } from '../common/helpers/uuid.helper';
 import { OrderStatus, Role } from '@prisma/client';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import { InjectQueue } from '@nestjs/bullmq';
+import { Queue } from 'bullmq';
+
+const AUTO_CANCEL_DELAY_MS = 30 * 60 * 1000; // 30 minutes
 
 @Injectable()
 export class OrdersService {
     constructor(
         private prisma: PrismaService,
-        private eventEmitter: EventEmitter2
+        private eventEmitter: EventEmitter2,
+        @InjectQueue('orders') private ordersQueue: Queue,
     ) { }
 
     private generateOrderCode(): string {
@@ -166,6 +171,13 @@ export class OrdersService {
                 sellerIdStr
             });
         }
+
+        // Schedule auto-cancel if order is still PENDING after 30 minutes
+        await this.ordersQueue.add(
+            'auto-cancel-order',
+            { orderId: orderIdStr, orderCode: order.orderCode },
+            { delay: AUTO_CANCEL_DELAY_MS },
+        );
 
         return this.serializeOrder(order);
     }

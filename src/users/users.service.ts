@@ -439,4 +439,64 @@ export class UsersService {
         });
         return admins.map(admin => bufferToUuid(admin.id));
     }
+
+    // ─── Public Seller Profile ──────────────────────────────────────────────────
+
+    async getSellerPublicProfile(idStr: string) {
+        const idBuf = uuidToBuffer(idStr);
+        const user = await this.prisma.user.findFirst({
+            where: {
+                id: idBuf,
+                role: Role.SELLER,
+                isDeleted: false,
+                status: UserStatus.ACTIVE,
+            },
+            include: {
+                sellerProfile: true,
+            },
+        });
+
+        if (!user || !user.sellerProfile) {
+            throw new NotFoundException('Seller not found');
+        }
+
+        if (user.sellerProfile.verificationStatus !== SellerVerificationStatus.APPROVED) {
+            throw new NotFoundException('Seller not found');
+        }
+
+        // Count total approved products
+        const totalProducts = await this.prisma.product.count({
+            where: {
+                sellerId: idBuf,
+                status: 'APPROVED',
+                isDeleted: false,
+            },
+        });
+
+        // Count total reviews across all products
+        const totalReviews = await this.prisma.review.count({
+            where: {
+                product: {
+                    sellerId: idBuf,
+                    isDeleted: false,
+                },
+            },
+        });
+
+        return {
+            id: bufferToUuid(user.id),
+            username: user.username,
+            shopName: user.sellerProfile.shopName,
+            sellerType: user.sellerProfile.sellerType,
+            shopRating: Number(user.sellerProfile.shopRating),
+            pickupAddress: user.sellerProfile.pickupAddress,
+            createdAt: user.sellerProfile.createdAt,
+            stats: {
+                totalProducts,
+                totalReviews,
+                rating: Number(user.sellerProfile.shopRating),
+                joinedAt: user.sellerProfile.createdAt,
+            },
+        };
+    }
 }

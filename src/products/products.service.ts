@@ -158,7 +158,22 @@ export class ProductsService {
             where: { id, isDeleted: false },
             include: { 
                 images: true, 
-                category: true, 
+                category: true,
+                seller: {
+                    select: {
+                        id: true,
+                        username: true,
+                        createdAt: true,
+                        sellerProfile: {
+                            select: {
+                                shopName: true,
+                                sellerType: true,
+                                verificationStatus: true,
+                                shopRating: true,
+                            },
+                        },
+                    },
+                },
                 reviews: { 
                     take: 10,
                     orderBy: { createdAt: 'desc' },
@@ -167,7 +182,24 @@ export class ProductsService {
             },
         });
         if (!product) throw new NotFoundException('Product not found');
-        return this.serializeProduct(product);
+
+        // Count total products by this seller for stats
+        const sellerProductCount = await this.prisma.product.count({
+            where: {
+                sellerId: product.sellerId,
+                status: ProductStatus.APPROVED,
+                isDeleted: false,
+            },
+        });
+
+        const serialized = this.serializeProduct(product);
+        if (serialized.seller?.sellerProfile) {
+            serialized.seller.sellerProfile.shopRating = Number(serialized.seller.sellerProfile.shopRating);
+        }
+        if (serialized.seller) {
+            serialized.seller.totalProducts = sellerProductCount;
+        }
+        return serialized;
     }
 
     async create(dto: CreateProductDto, sellerIdStr: string) {

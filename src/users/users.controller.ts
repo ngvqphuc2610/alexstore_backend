@@ -22,17 +22,24 @@ import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Role } from '@prisma/client';
 
 @ApiTags('Users')
-@ApiBearerAuth()
 @Controller('users')
-@UseGuards(JwtAuthGuard)
 export class UsersController {
     constructor(private readonly usersService: UsersService) { }
+
+    // ─── Public Endpoints (no auth required) ─────────────────────────────────
+
+    @Get('seller-profile/:id')
+    @ApiOperation({ summary: 'Get public seller profile (no auth required)' })
+    async getSellerPublicProfile(@Param('id') id: string) {
+        return this.usersService.getSellerPublicProfile(id);
+    }
 
     // ─── Administrative Endpoints ─────────────────────────────────────────────
 
     @Get()
+    @ApiBearerAuth()
     @Roles(Role.ADMIN)
-    @UseGuards(RolesGuard)
+    @UseGuards(JwtAuthGuard, RolesGuard)
     @ApiOperation({ summary: 'List all users (Admin only)' })
     async findAll(
         @Query('page') page?: string,
@@ -51,16 +58,18 @@ export class UsersController {
     }
 
     @Post()
+    @ApiBearerAuth()
     @Roles(Role.ADMIN)
-    @UseGuards(RolesGuard)
+    @UseGuards(JwtAuthGuard, RolesGuard)
     @ApiOperation({ summary: 'Create a new user (Admin only)' })
     async create(@Body() dto: CreateUserDto) {
         return this.usersService.create(dto);
     }
 
     @Patch(':id')
+    @ApiBearerAuth()
     @Roles(Role.ADMIN)
-    @UseGuards(RolesGuard)
+    @UseGuards(JwtAuthGuard, RolesGuard)
     @ApiOperation({ summary: 'Update a user by ID (Admin only)' })
     async updateById(
         @Param('id') id: string,
@@ -70,8 +79,9 @@ export class UsersController {
     }
 
     @Delete(':id')
+    @ApiBearerAuth()
     @Roles(Role.ADMIN)
-    @UseGuards(RolesGuard)
+    @UseGuards(JwtAuthGuard, RolesGuard)
     @ApiOperation({ summary: 'Deactivate a user by ID (Admin only)' })
     async deleteById(@Param('id') id: string) {
         return this.usersService.softDelete(id);
@@ -80,16 +90,18 @@ export class UsersController {
     // ─── Ban / Unban ──────────────────────────────────────────────────────────
 
     @Patch(':id/ban')
+    @ApiBearerAuth()
     @Roles(Role.ADMIN)
-    @UseGuards(RolesGuard)
+    @UseGuards(JwtAuthGuard, RolesGuard)
     @ApiOperation({ summary: 'Ban a user (Admin only)' })
     async banUser(@Param('id') id: string) {
         return this.usersService.banUser(id);
     }
 
     @Patch(':id/unban')
+    @ApiBearerAuth()
     @Roles(Role.ADMIN)
-    @UseGuards(RolesGuard)
+    @UseGuards(JwtAuthGuard, RolesGuard)
     @ApiOperation({ summary: 'Unban a user (Admin only)' })
     async unbanUser(@Param('id') id: string) {
         return this.usersService.unbanUser(id);
@@ -98,16 +110,18 @@ export class UsersController {
     // ─── Seller Verification ──────────────────────────────────────────────────
 
     @Patch(':id/approve-seller')
+    @ApiBearerAuth()
     @Roles(Role.ADMIN)
-    @UseGuards(RolesGuard)
+    @UseGuards(JwtAuthGuard, RolesGuard)
     @ApiOperation({ summary: 'Approve a seller (Admin only)' })
     async approveSeller(@Param('id') id: string) {
         return this.usersService.approveSeller(id);
     }
 
     @Patch(':id/reject-seller')
+    @ApiBearerAuth()
     @Roles(Role.ADMIN)
-    @UseGuards(RolesGuard)
+    @UseGuards(JwtAuthGuard, RolesGuard)
     @ApiOperation({ summary: 'Reject a seller (Admin only)' })
     async rejectSeller(@Param('id') id: string) {
         return this.usersService.rejectSeller(id);
@@ -116,8 +130,9 @@ export class UsersController {
     // ─── Pending Sellers (Admin) ────────────────────────────────────────────
 
     @Get('pending-sellers')
+    @ApiBearerAuth()
     @Roles(Role.ADMIN)
-    @UseGuards(RolesGuard)
+    @UseGuards(JwtAuthGuard, RolesGuard)
     @ApiOperation({ summary: 'List pending seller requests (Admin only)' })
     async getPendingSellers(
         @Query('page') page?: string,
@@ -132,6 +147,8 @@ export class UsersController {
     // ─── Seller Registration (Buyer → Seller) ────────────────────────────────
 
     @Post('seller/register')
+    @ApiBearerAuth()
+    @UseGuards(JwtAuthGuard)
     @ApiOperation({ summary: 'Register as a seller (Buyer submits application)' })
     async registerSeller(
         @CurrentUser('id') userId: string,
@@ -143,12 +160,16 @@ export class UsersController {
     // ─── Profile Endpoints ────────────────────────────────────────────────────
 
     @Get('me')
+    @ApiBearerAuth()
+    @UseGuards(JwtAuthGuard)
     @ApiOperation({ summary: 'Get current user profile' })
     async getProfile(@CurrentUser('id') userId: string) {
         return this.usersService.findById(userId);
     }
 
     @Put('me')
+    @ApiBearerAuth()
+    @UseGuards(JwtAuthGuard)
     @ApiOperation({ summary: 'Update current user profile' })
     async updateProfile(
         @CurrentUser('id') userId: string,
@@ -158,6 +179,8 @@ export class UsersController {
     }
 
     @Delete('me')
+    @ApiBearerAuth()
+    @UseGuards(JwtAuthGuard)
     @ApiOperation({ summary: 'Deactivate current user account' })
     async deactivate(@CurrentUser('id') userId: string) {
         return this.usersService.softDelete(userId);

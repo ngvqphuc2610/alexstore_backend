@@ -3,6 +3,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { CreateUserDto } from './dto/create-user.dto';
 import { RegisterSellerDto } from './dto/register-seller.dto';
+import { UpdateSellerProfileDto } from './dto/update-seller-profile.dto';
 import { bufferToUuid, uuidToBuffer, generateUuidV7 } from '../common/helpers/uuid.helper';
 import * as bcrypt from 'bcrypt';
 import { Role, UserStatus, SellerVerificationStatus } from '@prisma/client';
@@ -199,6 +200,34 @@ export class UsersService {
         });
 
         return { message: 'Account deactivated successfully' };
+    }
+
+    async updateSellerProfile(userId: string, dto: UpdateSellerProfileDto) {
+        const idBuf = uuidToBuffer(userId);
+        const user = await this.prisma.user.findFirst({
+            where: { id: idBuf, isDeleted: false },
+            include: { sellerProfile: true },
+        });
+
+        if (!user) throw new NotFoundException('User not found');
+        if (user.role !== Role.SELLER || !user.sellerProfile) {
+            throw new BadRequestException('User is not a seller');
+        }
+
+        const updatedProfile = await this.prisma.sellerProfile.update({
+            where: { userId: idBuf },
+            data: {
+                shopName: dto.shopName,
+                taxCode: dto.taxCode,
+                pickupAddress: dto.pickupAddress,
+                description: dto.description,
+            },
+        });
+
+        return {
+            message: 'Seller profile updated successfully',
+            data: updatedProfile,
+        };
     }
     // ─── Email Support ───────────────────────────────────────────────────────────
 
@@ -473,14 +502,44 @@ export class UsersService {
             },
         });
 
-        // Count total reviews across all products
-        const totalReviews = await this.prisma.review.count({
+        // Count total reviews and average rating across all products
+        const reviewStats = await this.prisma.review.aggregate({
             where: {
                 product: {
                     sellerId: idBuf,
                     isDeleted: false,
                 },
             },
+            _count: { _all: true },
+            _avg: { rating: true },
+        });
+
+        const totalReviews = reviewStats._count._all;
+        const averageRating = reviewStats._avg.rating || 0;
+
+        // Fetch unique categories that have active products from this seller
+        const categoriesData = await this.prisma.product.findMany({
+            where: {
+                sellerId: idBuf,
+                status: 'APPROVED',
+                isDeleted: false,
+            },
+            select: {
+                category: {
+                    select: {
+                        id: true,
+                        name: true,
+                    },
+                },
+            },
+            distinct: ['categoryId'],
+        });
+
+        const shopCategories = categoriesData.map(item => item.category);
+        
+        // Count total followers
+        const followerCount = await this.prisma.follow.count({
+            where: { sellerId: idBuf },
         });
 
         return {
@@ -488,15 +547,17 @@ export class UsersService {
             username: user.username,
             shopName: user.sellerProfile.shopName,
             sellerType: user.sellerProfile.sellerType,
-            shopRating: Number(user.sellerProfile.shopRating),
+            shopRating: averageRating,
             pickupAddress: user.sellerProfile.pickupAddress,
             createdAt: user.sellerProfile.createdAt,
             stats: {
                 totalProducts,
                 totalReviews,
-                rating: Number(user.sellerProfile.shopRating),
+                rating: averageRating,
                 joinedAt: user.sellerProfile.createdAt,
+                followerCount,
             },
+            shopCategories,
         };
     }
 }

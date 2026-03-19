@@ -69,13 +69,20 @@ export class ProductsService {
         limit?: number;
         sortBy?: string;
         sortOrder?: 'asc' | 'desc';
+        minPrice?: number;
+        maxPrice?: number;
+        minRating?: number;
     }) {
         const page = query.page ?? 1;
         const limit = query.limit ?? 20;
         const skip = (page - 1) * limit;
 
         const where: any = { isDeleted: false };
-        if (query.categoryId) where.categoryId = query.categoryId;
+        if (query.categoryId) where.categoryId = Number(query.categoryId);
+
+        if (query.minPrice !== undefined) where.price = { ...where.price, gte: query.minPrice };
+        if (query.maxPrice !== undefined) where.price = { ...where.price, lte: query.maxPrice };
+        if (query.minRating !== undefined) where.avgRating = { gte: query.minRating };
 
         if (query.status) {
             if (query.status !== 'all') {
@@ -192,9 +199,22 @@ export class ProductsService {
             },
         });
 
+        // Count total reviews and average rating across all products for this seller
+        const reviewStats = await this.prisma.review.aggregate({
+            where: {
+                product: {
+                    sellerId: product.sellerId,
+                    isDeleted: false,
+                },
+            },
+            _avg: { rating: true },
+        });
+
+        const averageRating = reviewStats._avg.rating || 0;
+
         const serialized = this.serializeProduct(product);
         if (serialized.seller?.sellerProfile) {
-            serialized.seller.sellerProfile.shopRating = Number(serialized.seller.sellerProfile.shopRating);
+            serialized.seller.sellerProfile.shopRating = Number(averageRating);
         }
         if (serialized.seller) {
             serialized.seller.totalProducts = sellerProductCount;

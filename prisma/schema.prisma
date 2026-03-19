@@ -101,6 +101,8 @@ model User {
   supportRequests SupportRequest[]
   favorites     Favorite[]
   notifications Notification[]
+  follows       Follow[]           @relation("BuyerFollows")
+  followers     Follow[]           @relation("SellerFollowers")
 
   @@index([role], name: "idx_users_role")
   @@index([status], name: "idx_users_status")
@@ -142,6 +144,7 @@ model SellerProfile {
   taxCode            String?                  @map("tax_code") @db.VarChar(50)
   shopRating         Decimal                  @default(0.00) @map("shop_rating") @db.Decimal(3, 2)
   pickupAddress      String?                  @map("pickup_address") @db.Text
+  description        String?                  @db.Text
   createdAt          DateTime                 @default(now()) @map("created_at")
   updatedAt          DateTime                 @updatedAt @map("updated_at")
 
@@ -404,4 +407,19 @@ model EmailLog {
   @@index([to], name: "idx_email_logs_to")
   @@index([sentAt], name: "idx_email_logs_sent_at")
   @@map("email_logs")
+}
+
+model Follow {
+  id        Bytes    @id @db.Binary(16)
+  buyerId   Bytes    @map("buyer_id") @db.Binary(16)
+  sellerId  Bytes    @map("seller_id") @db.Binary(16)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  buyer     User     @relation("BuyerFollows", fields: [buyerId], references: [id], onDelete: Cascade)
+  seller    User     @relation("SellerFollowers", fields: [sellerId], references: [id], onDelete: Cascade)
+
+  @@unique([buyerId, sellerId], name: "uq_follow_buyer_seller")
+  @@index([buyerId], name: "idx_follows_buyer")
+  @@index([sellerId], name: "idx_follows_seller")
+  @@map("follows")
 }

@@ -16,7 +16,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 
-const AUTO_CANCEL_DELAY_MS = 30 * 60 * 1000; // 30 minutes
+const AUTO_CANCEL_DELAY_MS = 15 * 60 * 1000; // 15 minutes
 
 @Injectable()
 export class OrdersService {
@@ -39,10 +39,14 @@ export class OrdersService {
     }
 
     private serializeOrder(order: any) {
+        const createdAt = (order as any).createdAt;
+        const expiresAt = new Date(new Date(createdAt).getTime() + 15 * 60 * 1000);
+
         return {
             ...order,
             id: bufferToUuid(order.id),
             buyerId: bufferToUuid(order.buyerId),
+            expiresAt: expiresAt.toISOString(),
             totalAmount: Number(order.totalAmount),
             orderItems: order.orderItems?.map((item: any) => ({
                 ...item,
@@ -143,6 +147,15 @@ export class OrdersService {
                 })),
             });
 
+            // ─── Step 5: clear cart ───────────────────────────────────────────
+            await tx.cartItem.deleteMany({
+                where: {
+                    cart: {
+                        buyerId: buyerId as any,
+                    },
+                },
+            });
+
             return tx.order.findUnique({
                 where: { id: orderId },
                 include: { orderItems: { include: { product: { select: { sellerId: true } } } } },
@@ -172,12 +185,15 @@ export class OrdersService {
             });
         }
 
-        // Schedule auto-cancel if order is still PENDING after 30 minutes
-        await this.ordersQueue.add(
-            'auto-cancel-order',
-            { orderId: orderIdStr, orderCode: order.orderCode },
-            { delay: AUTO_CANCEL_DELAY_MS },
-        );
+        // Schedule auto-cancel if order is still PENDING after 15 minutes
+        // Only for online payments (not COD)
+        if (dto.paymentMethod !== 'COD') {
+            await this.ordersQueue.add(
+                'auto-cancel-order',
+                { orderId: orderIdStr, orderCode: order.orderCode },
+                { delay: AUTO_CANCEL_DELAY_MS },
+            );
+        }
 
         return this.serializeOrder(order);
     }

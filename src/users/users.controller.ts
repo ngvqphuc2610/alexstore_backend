@@ -15,6 +15,7 @@ import { UsersService } from './users.service';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { CreateUserDto } from './dto/create-user.dto';
 import { RegisterSellerDto } from './dto/register-seller.dto';
+import { UpdateSellerProfileDto } from './dto/update-seller-profile.dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
@@ -176,6 +177,18 @@ export class UsersController {
         @Body() dto: UpdateUserDto,
     ) {
         return this.usersService.update(userId, dto);
+    }
+
+    @Patch('me/seller-profile')
+    @ApiBearerAuth()
+    @Roles(Role.SELLER)
+    @UseGuards(JwtAuthGuard, RolesGuard)
+    @ApiOperation({ summary: 'Update current seller shop information' })
+    async updateSellerProfile(
+        @CurrentUser('id') userId: string,
+        @Body() dto: UpdateSellerProfileDto,
+    ) {
+        return this.usersService.updateSellerProfile(userId, dto);
     }
 
     @Delete('me')

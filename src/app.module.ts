@@ -20,6 +20,7 @@ import { AdminAnalyticsModule } from './admin-analytics/admin-analytics.module';
 import { AddressesModule } from './addresses/addresses.module';
 import { FavoritesModule } from './favorites/favorites.module';
 import { NotificationsModule } from './notifications/notifications.module';
+import { FollowsModule } from './follows/follows.module';
 import { BullModule } from '@nestjs/bullmq';
 import { MailModule } from './mail/mail.module';
 import { BullBoardConfigModule } from './bull-board/bull-board.module';
@@ -53,6 +54,7 @@ import { RedisModule } from './redis/redis.module';
     AddressesModule,
     FavoritesModule,
     NotificationsModule,
+    FollowsModule,
     BullModule.forRoot({
       connection: {
         host: process.env.REDIS_HOST || 'localhost',

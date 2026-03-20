@@ -103,6 +103,9 @@ model User {
   notifications Notification[]
   follows       Follow[]           @relation("BuyerFollows")
   followers     Follow[]           @relation("SellerFollowers")
+  buyerConversations  Conversation[] @relation("BuyerConversations")
+  sellerConversations Conversation[] @relation("SellerConversations")
+  sentMessages  Message[]          @relation("SentMessages")
 
   @@index([role], name: "idx_users_role")
   @@index([status], name: "idx_users_status")
@@ -197,6 +200,7 @@ model Product {
   orderItems OrderItem[]
   reviews    Review[]
   favorites  Favorite[]
+  chatReferences Message[] @relation("ProductReferences")
 
   @@index([sellerId], name: "idx_products_seller")
   @@index([categoryId], name: "idx_products_category")
@@ -265,6 +269,7 @@ model Order {
 
   buyer      User        @relation(fields: [buyerId], references: [id])
   orderItems OrderItem[]
+  chatReferences Message[] @relation("OrderReferences")
 
   @@index([buyerId], name: "idx_orders_buyer")
   @@index([status], name: "idx_orders_status")
@@ -422,4 +427,57 @@ model Follow {
   @@index([buyerId], name: "idx_follows_buyer")
   @@index([sellerId], name: "idx_follows_seller")
   @@map("follows")
+}
+
+// ─── Chat ────────────────────────────────────────────────────────────────────
+
+enum MessageType {
+  TEXT
+  IMAGE
+  VIDEO
+  PRODUCT_REF
+  ORDER_REF
+}
+
+model Conversation {
+  id                Bytes    @id @db.Binary(16)
+  buyerId           Bytes    @map("buyer_id") @db.Binary(16)
+  sellerId          Bytes    @map("seller_id") @db.Binary(16)
+  lastMessage       String?  @map("last_message") @db.VarChar(500)
+  lastMessageAt     DateTime? @map("last_message_at")
+  unreadCountBuyer  Int      @default(0) @map("unread_count_buyer")
+  unreadCountSeller Int      @default(0) @map("unread_count_seller")
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  buyer    User      @relation("BuyerConversations", fields: [buyerId], references: [id], onDelete: Cascade)
+  seller   User      @relation("SellerConversations", fields: [sellerId], references: [id], onDelete: Cascade)
+  messages Message[]
+
+  @@unique([buyerId, sellerId], name: "uq_conversation_buyer_seller")
+  @@index([buyerId], name: "idx_conversations_buyer")
+  @@index([sellerId], name: "idx_conversations_seller")
+  @@index([lastMessageAt], name: "idx_conversations_last_message")
+  @@map("conversations")
+}
+
+model Message {
+  id                  BigInt      @id @default(autoincrement())
+  conversationId      Bytes       @map("conversation_id") @db.Binary(16)
+  senderId            Bytes       @map("sender_id") @db.Binary(16)
+  type                MessageType @default(TEXT)
+  content             String      @db.Text
+  referencedProductId Bytes?      @map("referenced_product_id") @db.Binary(16)
+  referencedOrderId   Bytes?      @map("referenced_order_id") @db.Binary(16)
+  isRead              Boolean     @default(false) @map("is_read")
+  createdAt           DateTime    @default(now()) @map("created_at")
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sender       User         @relation("SentMessages", fields: [senderId], references: [id], onDelete: Cascade)
+  product      Product?     @relation("ProductReferences", fields: [referencedProductId], references: [id])
+  order        Order?       @relation("OrderReferences", fields: [referencedOrderId], references: [id])
+
+  @@index([conversationId, createdAt], name: "idx_messages_conv_created")
+  @@index([senderId], name: "idx_messages_sender")
+  @@map("messages")
 }

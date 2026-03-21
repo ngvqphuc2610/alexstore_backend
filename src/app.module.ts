@@ -26,6 +26,7 @@ import { BullModule } from '@nestjs/bullmq';
 import { MailModule } from './mail/mail.module';
 import { BullBoardConfigModule } from './bull-board/bull-board.module';
 import { RedisModule } from './redis/redis.module';
+import { DiscountModule } from './discount/discount.module';
 
 @Module({
   imports: [
@@ -65,6 +66,7 @@ import { RedisModule } from './redis/redis.module';
     }),
     MailModule,
     BullBoardConfigModule,
+    DiscountModule,
   ],
 })
 export class AppModule { }

@@ -68,46 +68,117 @@ export class OrdersService {
         const buyerId = uuidToBuffer(buyerIdStr);
 
         const order = await this.prisma.$transaction(async (tx) => {
-            let totalAmount = 0;
+            let totalProductAmount = 0;
 
-            // ─── Step 1: validate all items ──────────────────────────────────
+            // ─── Step 1: validate all items and lock stock ───────────────────
             const resolvedItems: Array<{
                 productId: Uint8Array;
                 quantity: number;
                 priceAtPurchase: number;
+                sellerId: Uint8Array;
             }> = [];
 
             for (const item of dto.items) {
                 const productId = uuidToBuffer(item.productId);
+                
                 const product = await tx.product.findFirst({
                     where: { id: productId, isDeleted: false, status: 'APPROVED' },
                 });
 
                 if (!product) {
-                    throw new NotFoundException(
-                        `Product ${item.productId} not found or unavailable`,
-                    );
+                    throw new NotFoundException(`Product ${item.productId} not found`);
                 }
 
-                if (product.stockQuantity < item.quantity) {
-                    throw new BadRequestException(
-                        `Insufficient stock for product "${product.name}". Available: ${product.stockQuantity}`,
-                    );
+                // Atomic stock decrement to prevent race conditions
+                const updatedProduct = await tx.product.updateMany({
+                    where: { 
+                        id: productId, 
+                        stockQuantity: { gte: item.quantity } 
+                    },
+                    data: { stockQuantity: { decrement: item.quantity } },
+                });
+
+                if (updatedProduct.count === 0) {
+                    throw new BadRequestException(`Insufficient stock for product "${product.name}"`);
                 }
 
                 const price = Number(product.price);
-                totalAmount += price * item.quantity;
-                // Re-use our locally created productId (Uint8Array<ArrayBuffer>)
-                resolvedItems.push({ productId, quantity: item.quantity, priceAtPurchase: price });
+                totalProductAmount += price * item.quantity;
+                resolvedItems.push({ productId, quantity: item.quantity, priceAtPurchase: price, sellerId: product.sellerId as any });
             }
 
-            // ─── Step 2: deduct stock ─────────────────────────────────────────
-            for (const item of resolvedItems) {
-                await tx.product.update({
-                    where: { id: item.productId as unknown as Uint8Array<ArrayBuffer> },
-                    data: { stockQuantity: { decrement: item.quantity } },
-                });
+            // ─── Step 2: Validate and Apply Vouchers ──────────────────────────
+            let shopDiscountAmount = 0;
+            let shopDiscountCode: string | null = null;
+            let platformDiscountAmount = 0;
+            let platformDiscountCode: string | null = null;
+            let freeshipAmount = 0;
+            let freeshipCode: string | null = null;
+            const appliedVoucherBuffers: Uint8Array[] = [];
+
+            if (dto.appliedVouchers && dto.appliedVouchers.length > 0) {
+                // Ensure max 3 vouchers
+                if (dto.appliedVouchers.length > 3) throw new BadRequestException('Cannot apply more than 3 vouchers');
+                
+                for (const voucherIdStr of dto.appliedVouchers) {
+                    const vIdBuffer = uuidToBuffer(voucherIdStr);
+                    const discount = await tx.discount.findFirst({
+                        where: { id: vIdBuffer, status: 'ACTIVE' }
+                    });
+
+                    if (!discount || new Date() > discount.endDate) {
+                        throw new BadRequestException(`Voucher ${voucherIdStr} is invalid or expired`);
+                    }
+
+                    if (Number(discount.minOrderValue) > totalProductAmount) {
+                        throw new BadRequestException(`Order does not meet minimum value for voucher ${discount.code}`);
+                    }
+
+                    // Atomic usage increment
+                    const updatedDiscount = await tx.discount.updateMany({
+                        where: { id: vIdBuffer, usedCount: { lt: discount.usageLimit } },
+                        data: { usedCount: { increment: 1 } }
+                    });
+
+                    if (updatedDiscount.count === 0) {
+                        throw new BadRequestException(`Voucher ${discount.code} has reached its usage limit`);
+                    }
+
+                    appliedVoucherBuffers.push(vIdBuffer);
+
+                    // Compute discount value
+                    let discountValue = 0;
+                    if (discount.type === 'PERCENTAGE') {
+                        discountValue = totalProductAmount * (Number(discount.value) / 100);
+                        if (discount.maxDiscountAmount && discountValue > Number(discount.maxDiscountAmount)) {
+                            discountValue = Number(discount.maxDiscountAmount);
+                        }
+                    } else {
+                        discountValue = Number(discount.value);
+                    }
+
+                    if (discount.type === 'FREESHIP') {
+                        freeshipAmount += discountValue;
+                        freeshipCode = discount.code;
+                    } else if (discount.scope === 'SHOP') {
+                        shopDiscountAmount += discountValue;
+                        shopDiscountCode = discount.code;
+                    } else if (discount.scope === 'PLATFORM') {
+                        platformDiscountAmount += discountValue;
+                        platformDiscountCode = discount.code;
+                    }
+                }
             }
+
+            // Accounting Logic: 
+            // Taxable/Settlement amount = Base - Shop Discount. (Platform discount is subsidized)
+            // Final total logic:
+            const shippingFee = 30000; // Mocked
+            const actualShipping = Math.max(0, shippingFee - freeshipAmount);
+            let finalProductAmount = totalProductAmount - shopDiscountAmount - platformDiscountAmount;
+            if (finalProductAmount < 0) finalProductAmount = 0;
+            
+            const finalTotal = finalProductAmount + actualShipping;
 
             // ─── Step 3: validate address and create order ─────────────────────
             const orderId = generateUuidV7();
@@ -118,9 +189,7 @@ export class OrdersService {
                 where: { id: addressId as any, userId: buyerId as any, isDeleted: false }
             });
 
-            if (!address) {
-                throw new NotFoundException('Selected address not found or has been deleted');
-            }
+            if (!address) throw new NotFoundException('Selected address not found');
 
             const shippingAddressStr = `${address.addressLine}, ${address.ward}, ${address.district}, ${address.province}`;
 
@@ -129,7 +198,13 @@ export class OrdersService {
                     id: orderId as any,
                     orderCode,
                     buyerId: buyerId as any,
-                    totalAmount,
+                    totalAmount: finalTotal,
+                    shopDiscountCode,
+                    shopDiscountAmount,
+                    platformDiscountCode,
+                    platformDiscountAmount,
+                    freeshipCode,
+                    freeshipAmount,
                     shippingName: address.fullName,
                     shippingPhone: address.phoneNumber,
                     shippingAddress: shippingAddressStr,
@@ -146,14 +221,25 @@ export class OrdersService {
                     priceAtPurchase: item.priceAtPurchase,
                 })),
             });
-
-            // ─── Step 5: clear cart ───────────────────────────────────────────
-            await tx.cartItem.deleteMany({
-                where: {
-                    cart: {
-                        buyerId: buyerId as any,
+            
+            // ─── Step 5: Update UserVoucher to USED ───────────────────────────
+            if (appliedVoucherBuffers.length > 0) {
+                await tx.userVoucher.updateMany({
+                    where: {
+                        userId: buyerId as any,
+                        discountId: { in: appliedVoucherBuffers as any[] }
                     },
-                },
+                    data: {
+                        status: 'USED',
+                        usedAt: new Date(),
+                        orderId: newOrder.id
+                    }
+                });
+            }
+
+            // ─── Step 6: clear cart ───────────────────────────────────────────
+            await tx.cartItem.deleteMany({
+                where: { cart: { buyerId: buyerId as any } },
             });
 
             return tx.order.findUnique({
@@ -162,16 +248,12 @@ export class OrdersService {
             });
         });
 
-        if (!order) {
-            throw new NotFoundException('Failed to create order');
-        }
+        if (!order) throw new NotFoundException('Failed to create order');
 
         const uniqueSellerIds = new Set<string>();
         if (order.orderItems) {
             for (const item of order.orderItems) {
-                if (item.product?.sellerId) {
-                    uniqueSellerIds.add(bufferToUuid(item.product.sellerId));
-                }
+                if (item.product?.sellerId) uniqueSellerIds.add(bufferToUuid(item.product.sellerId));
             }
         }
 
@@ -185,8 +267,6 @@ export class OrdersService {
             });
         }
 
-        // Schedule auto-cancel if order is still PENDING after 15 minutes
-        // Only for online payments (not COD)
         if (dto.paymentMethod !== 'COD') {
             await this.ordersQueue.add(
                 'auto-cancel-order',
@@ -362,6 +442,7 @@ export class OrdersService {
         const id = uuidToBuffer(idStr);
         const order = await this.prisma.order.findFirst({
             where: { id, isDeleted: false },
+            include: { userVouchers: true }
         });
         if (!order) throw new NotFoundException('Order not found');
 
@@ -381,13 +462,34 @@ export class OrdersService {
                     data: { stockQuantity: { increment: item.quantity } },
                 });
             }
+
+            // Refund UserVouchers if any
+            if (order.userVouchers && order.userVouchers.length > 0) {
+                await tx.userVoucher.updateMany({
+                    where: { orderId: id },
+                    data: {
+                        status: 'SAVED',
+                        usedAt: null,
+                        orderId: null
+                    }
+                });
+                
+                // Decrement discount usage count
+                for (const uv of order.userVouchers) {
+                    await tx.discount.updateMany({
+                        where: { id: uv.discountId, usedCount: { gt: 0 } },
+                        data: { usedCount: { decrement: 1 } }
+                    });
+                }
+            }
+
             await tx.order.update({
                 where: { id },
                 data: { status: OrderStatus.CANCELLED },
             });
         });
 
-        return { message: 'Order cancelled and stock restored' };
+        return { message: 'Order cancelled, stock restored, vouchers refunded' };
     }
 
     async updateStatus(idStr: string, status: OrderStatus) {

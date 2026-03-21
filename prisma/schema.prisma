@@ -7,7 +7,6 @@ generator client {
 
 datasource db {
   provider = "mysql"
-  
 }
 
 // ─── Enums ───────────────────────────────────────────────────────────────────
@@ -72,6 +71,35 @@ enum SellerVerificationStatus {
   REJECTED
 }
 
+enum DiscountType {
+  FIXED_AMOUNT
+  PERCENTAGE
+  FREESHIP
+}
+
+enum DiscountScopeType {
+  PLATFORM
+  SHOP
+}
+
+enum DiscountStatus {
+  ACTIVE
+  EXPIRED
+  INACTIVE
+}
+
+enum TargetAudience {
+  ALL
+  NEW_USER
+  VIP_ONLY
+}
+
+enum UserVoucherStatus {
+  SAVED
+  USED
+  EXPIRED
+}
+
 // ─── Models ──────────────────────────────────────────────────────────────────
 
 model User {
@@ -87,25 +115,27 @@ model User {
   createdAt    DateTime   @default(now()) @map("created_at")
   updatedAt    DateTime   @updatedAt @map("updated_at")
 
-  otpHash      String?    @map("otp_hash") @db.VarChar(255)
-  otpExpireAt  DateTime?  @map("otp_expire_at")
+  otpHash     String?   @map("otp_hash") @db.VarChar(255)
+  otpExpireAt DateTime? @map("otp_expire_at")
 
-  buyerProfile  BuyerProfile?
-  sellerProfile SellerProfile?
+  buyerProfile         BuyerProfile?
+  sellerProfile        SellerProfile?
   notificationSettings UserNotificationSettings?
-  products      Product[]
-  cart          Cart?
-  orders        Order[]
-  addresses     Address[]
-  reviews       Review[]
-  supportRequests SupportRequest[]
-  favorites     Favorite[]
-  notifications Notification[]
-  follows       Follow[]           @relation("BuyerFollows")
-  followers     Follow[]           @relation("SellerFollowers")
-  buyerConversations  Conversation[] @relation("BuyerConversations")
-  sellerConversations Conversation[] @relation("SellerConversations")
-  sentMessages  Message[]          @relation("SentMessages")
+  products             Product[]
+  cart                 Cart?
+  orders               Order[]
+  addresses            Address[]
+  reviews              Review[]
+  supportRequests      SupportRequest[]
+  favorites            Favorite[]
+  notifications        Notification[]
+  follows              Follow[]                  @relation("BuyerFollows")
+  followers            Follow[]                  @relation("SellerFollowers")
+  buyerConversations   Conversation[]            @relation("BuyerConversations")
+  sellerConversations  Conversation[]            @relation("SellerConversations")
+  sentMessages         Message[]                 @relation("SentMessages")
+  userVouchers         UserVoucher[]
+  createdDiscounts     Discount[]                @relation("SellerDiscounts")
 
   @@index([role], name: "idx_users_role")
   @@index([status], name: "idx_users_status")
@@ -157,13 +187,14 @@ model SellerProfile {
 }
 
 model Category {
-  id       Int       @id @default(autoincrement())
-  name     String    @db.VarChar(100)
-  parentId Int?      @map("parent_id")
-  parent   Category? @relation("CategoryToCategory", fields: [parentId], references: [id], onDelete: SetNull)
-  children Category[] @relation("CategoryToCategory")
-  products Product[]
+  id                 Int                         @id @default(autoincrement())
+  name               String                      @db.VarChar(100)
+  parentId           Int?                        @map("parent_id")
+  parent             Category?                   @relation("CategoryToCategory", fields: [parentId], references: [id], onDelete: SetNull)
+  children           Category[]                  @relation("CategoryToCategory")
+  products           Product[]
   allowedSellerTypes CategoryAllowedSellerType[]
+  discountScopes     DiscountScope[]
 
   @@map("categories")
 }
@@ -184,6 +215,8 @@ model Product {
   categoryId    Int           @map("category_id")
   name          String        @db.VarChar(255)
   description   String?       @db.Text
+  originalPrice Decimal?      @map("original_price") @db.Decimal(15, 2)
+  salePrice     Decimal?      @map("sale_price") @db.Decimal(15, 2)
   price         Decimal       @db.Decimal(15, 2)
   stockQuantity Int           @default(0) @map("stock_quantity")
   avgRating     Decimal       @default(0.00) @map("avg_rating") @db.Decimal(3, 2)
@@ -193,14 +226,15 @@ model Product {
   createdAt     DateTime      @default(now()) @map("created_at")
   updatedAt     DateTime      @updatedAt @map("updated_at")
 
-  seller     User           @relation(fields: [sellerId], references: [id])
-  category   Category       @relation(fields: [categoryId], references: [id])
-  images     ProductImage[]
-  cartItems  CartItem[]
-  orderItems OrderItem[]
-  reviews    Review[]
-  favorites  Favorite[]
-  chatReferences Message[] @relation("ProductReferences")
+  seller         User            @relation(fields: [sellerId], references: [id])
+  category       Category        @relation(fields: [categoryId], references: [id])
+  images         ProductImage[]
+  cartItems      CartItem[]
+  orderItems     OrderItem[]
+  reviews        Review[]
+  favorites      Favorite[]
+  chatReferences Message[]       @relation("ProductReferences")
+  discountScopes DiscountScope[]
 
   @@index([sellerId], name: "idx_products_seller")
   @@index([categoryId], name: "idx_products_category")
@@ -250,26 +284,33 @@ model CartItem {
 }
 
 model Order {
-  id                   Bytes         @id @db.Binary(16)
-  orderCode            String        @unique @map("order_code") @db.VarChar(30)
-  buyerId              Bytes         @map("buyer_id") @db.Binary(16)
-  totalAmount          Decimal       @default(0) @map("total_amount") @db.Decimal(15, 2)
-  status               OrderStatus   @default(PENDING)
-  paymentMethod        String?       @map("payment_method") @db.VarChar(50)
-  paymentStatus        PaymentStatus @default(UNPAID) @map("payment_status")
-  paymentTransactionId String?       @map("payment_transaction_id") @db.VarChar(100)
-  paidAt               DateTime?     @map("paid_at")
-  shippingName         String        @default("Unspecified") @map("shipping_name") @db.VarChar(100)
-  shippingPhone        String        @default("0000000000") @map("shipping_phone") @db.VarChar(20)
-  shippingAddress      String        @map("shipping_address") @db.Text
-  isDeleted            Boolean       @default(false) @map("is_deleted")
-  deliveredAt          DateTime?     @map("delivered_at")
-  createdAt            DateTime      @default(now()) @map("created_at")
-  updatedAt            DateTime      @updatedAt @map("updated_at")
+  id                     Bytes         @id @db.Binary(16)
+  orderCode              String        @unique @map("order_code") @db.VarChar(30)
+  buyerId                Bytes         @map("buyer_id") @db.Binary(16)
+  totalAmount            Decimal       @default(0) @map("total_amount") @db.Decimal(15, 2)
+  shopDiscountCode       String?       @map("shop_discount_code") @db.VarChar(50)
+  shopDiscountAmount     Decimal       @default(0) @map("shop_discount_amount") @db.Decimal(15, 2)
+  platformDiscountCode   String?       @map("platform_discount_code") @db.VarChar(50)
+  platformDiscountAmount Decimal       @default(0) @map("platform_discount_amount") @db.Decimal(15, 2)
+  freeshipCode           String?       @map("freeship_code") @db.VarChar(50)
+  freeshipAmount         Decimal       @default(0) @map("freeship_amount") @db.Decimal(15, 2)
+  status                 OrderStatus   @default(PENDING)
+  paymentMethod          String?       @map("payment_method") @db.VarChar(50)
+  paymentStatus          PaymentStatus @default(UNPAID) @map("payment_status")
+  paymentTransactionId   String?       @map("payment_transaction_id") @db.VarChar(100)
+  paidAt                 DateTime?     @map("paid_at")
+  shippingName           String        @default("Unspecified") @map("shipping_name") @db.VarChar(100)
+  shippingPhone          String        @default("0000000000") @map("shipping_phone") @db.VarChar(20)
+  shippingAddress        String        @map("shipping_address") @db.Text
+  isDeleted              Boolean       @default(false) @map("is_deleted")
+  deliveredAt            DateTime?     @map("delivered_at")
+  createdAt              DateTime      @default(now()) @map("created_at")
+  updatedAt              DateTime      @updatedAt @map("updated_at")
 
-  buyer      User        @relation(fields: [buyerId], references: [id])
-  orderItems OrderItem[]
-  chatReferences Message[] @relation("OrderReferences")
+  buyer          User          @relation(fields: [buyerId], references: [id])
+  orderItems     OrderItem[]
+  chatReferences Message[]     @relation("OrderReferences")
+  userVouchers   UserVoucher[]
 
   @@index([buyerId], name: "idx_orders_buyer")
   @@index([status], name: "idx_orders_status")
@@ -326,10 +367,10 @@ model SupportRequest {
 }
 
 model DailyPerformanceStats {
-  id          Int      @id @default(autoincrement())
-  date        DateTime @db.Date
-  sellerId    Bytes    @map("seller_id") @db.Binary(16)
-  categoryId  Int      @map("category_id")
+  id                   Int      @id @default(autoincrement())
+  date                 DateTime @db.Date
+  sellerId             Bytes    @map("seller_id") @db.Binary(16)
+  categoryId           Int      @map("category_id")
   revenue              Decimal  @default(0.00) @db.Decimal(15, 2)
   ordersCount          Int      @default(0) @map("orders_count")
   completedOrdersCount Int      @default(0) @map("completed_orders_count")
@@ -344,24 +385,24 @@ model DailyPerformanceStats {
 }
 
 model Address {
-  id          Bytes    @id @db.Binary(16)
-  userId      Bytes    @map("user_id") @db.Binary(16)
+  id     Bytes @id @db.Binary(16)
+  userId Bytes @map("user_id") @db.Binary(16)
 
-  fullName    String   @map("full_name") @db.VarChar(100)
-  phoneNumber String   @map("phone_number") @db.VarChar(20)
+  fullName    String @map("full_name") @db.VarChar(100)
+  phoneNumber String @map("phone_number") @db.VarChar(20)
 
-  province    String   @db.VarChar(100)
-  district    String   @db.VarChar(100)
-  ward        String   @db.VarChar(100)
-  addressLine String   @map("address_line") @db.VarChar(255)
+  province    String @db.VarChar(100)
+  district    String @db.VarChar(100)
+  ward        String @db.VarChar(100)
+  addressLine String @map("address_line") @db.VarChar(255)
 
-  isDefault   Boolean  @default(false) @map("is_default")
-  isDeleted   Boolean  @default(false) @map("is_deleted")
+  isDefault Boolean @default(false) @map("is_default")
+  isDeleted Boolean @default(false) @map("is_deleted")
 
-  createdAt   DateTime @default(now()) @map("created_at")
-  updatedAt   DateTime @updatedAt @map("updated_at")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
 
-  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId], name: "idx_addresses_user")
   @@map("addresses")
@@ -373,8 +414,8 @@ model Favorite {
   productId Bytes    @map("product_id") @db.Binary(16)
   createdAt DateTime @default(now()) @map("created_at")
 
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
 
   @@unique([userId, productId], name: "uq_favorite_user_product")
   @@index([userId], name: "idx_favorites_user")
@@ -391,7 +432,7 @@ model Notification {
   isRead    Boolean  @default(false) @map("is_read")
   createdAt DateTime @default(now()) @map("created_at")
 
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId], name: "idx_notifications_user")
   @@index([isRead], name: "idx_notifications_is_read")
@@ -400,14 +441,14 @@ model Notification {
 }
 
 model EmailLog {
-  id        BigInt   @id @default(autoincrement())
-  to        String   @db.VarChar(100)
-  subject   String   @db.VarChar(255)
-  template  String   @db.VarChar(50)
-  context   String?  @db.Text // JSON string of context
-  status    String   @db.VarChar(20) // "SUCCESS", "FAILED"
-  error     String?  @db.Text
-  sentAt    DateTime @default(now()) @map("sent_at")
+  id       BigInt   @id @default(autoincrement())
+  to       String   @db.VarChar(100)
+  subject  String   @db.VarChar(255)
+  template String   @db.VarChar(50)
+  context  String?  @db.Text // JSON string of context
+  status   String   @db.VarChar(20) // "SUCCESS", "FAILED"
+  error    String?  @db.Text
+  sentAt   DateTime @default(now()) @map("sent_at")
 
   @@index([to], name: "idx_email_logs_to")
   @@index([sentAt], name: "idx_email_logs_sent_at")
@@ -420,8 +461,8 @@ model Follow {
   sellerId  Bytes    @map("seller_id") @db.Binary(16)
   createdAt DateTime @default(now()) @map("created_at")
 
-  buyer     User     @relation("BuyerFollows", fields: [buyerId], references: [id], onDelete: Cascade)
-  seller    User     @relation("SellerFollowers", fields: [sellerId], references: [id], onDelete: Cascade)
+  buyer  User @relation("BuyerFollows", fields: [buyerId], references: [id], onDelete: Cascade)
+  seller User @relation("SellerFollowers", fields: [sellerId], references: [id], onDelete: Cascade)
 
   @@unique([buyerId, sellerId], name: "uq_follow_buyer_seller")
   @@index([buyerId], name: "idx_follows_buyer")
@@ -440,15 +481,15 @@ enum MessageType {
 }
 
 model Conversation {
-  id                Bytes    @id @db.Binary(16)
-  buyerId           Bytes    @map("buyer_id") @db.Binary(16)
-  sellerId          Bytes    @map("seller_id") @db.Binary(16)
-  lastMessage       String?  @map("last_message") @db.VarChar(500)
+  id                Bytes     @id @db.Binary(16)
+  buyerId           Bytes     @map("buyer_id") @db.Binary(16)
+  sellerId          Bytes     @map("seller_id") @db.Binary(16)
+  lastMessage       String?   @map("last_message") @db.VarChar(500)
   lastMessageAt     DateTime? @map("last_message_at")
-  unreadCountBuyer  Int      @default(0) @map("unread_count_buyer")
-  unreadCountSeller Int      @default(0) @map("unread_count_seller")
-  createdAt         DateTime @default(now()) @map("created_at")
-  updatedAt         DateTime @updatedAt @map("updated_at")
+  unreadCountBuyer  Int       @default(0) @map("unread_count_buyer")
+  unreadCountSeller Int       @default(0) @map("unread_count_seller")
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
 
   buyer    User      @relation("BuyerConversations", fields: [buyerId], references: [id], onDelete: Cascade)
   seller   User      @relation("SellerConversations", fields: [sellerId], references: [id], onDelete: Cascade)
@@ -480,4 +521,75 @@ model Message {
   @@index([conversationId, createdAt], name: "idx_messages_conv_created")
   @@index([senderId], name: "idx_messages_sender")
   @@map("messages")
+}
+
+// ─── Discount & Promotions ───────────────────────────────────────────────────
+
+model Discount {
+  id                Bytes             @id @db.Binary(16)
+  code              String            @unique @db.VarChar(50)
+  name              String            @db.VarChar(255)
+  description       String?           @db.Text
+  type              DiscountType
+  scope             DiscountScopeType
+  value             Decimal           @db.Decimal(15, 2) // Fixed amount or Percentage
+  minOrderValue     Decimal           @default(0) @map("min_order_value") @db.Decimal(15, 2)
+  maxDiscountAmount Decimal?          @map("max_discount_amount") @db.Decimal(15, 2)
+  startDate         DateTime          @map("start_date")
+  endDate           DateTime          @map("end_date")
+  usageLimit        Int               @map("usage_limit")
+  usedCount         Int               @default(0) @map("used_count")
+  sellerId          Bytes?            @map("seller_id") @db.Binary(16) // NULL if PLATFORM
+  isPrivate         Boolean           @default(false) @map("is_private")
+  targetAudience    TargetAudience    @default(ALL) @map("target_audience")
+  status            DiscountStatus    @default(ACTIVE)
+  createdAt         DateTime          @default(now()) @map("created_at")
+  updatedAt         DateTime          @updatedAt @map("updated_at")
+
+  seller       User?           @relation("SellerDiscounts", fields: [sellerId], references: [id])
+  scopes       DiscountScope[]
+  userVouchers UserVoucher[]
+
+  @@index([sellerId], name: "idx_discounts_seller")
+  @@index([code], name: "idx_discounts_code")
+  @@index([status], name: "idx_discounts_status")
+  @@index([startDate, endDate], name: "idx_discounts_dates")
+  @@map("discounts")
+}
+
+model DiscountScope {
+  id         Int    @id @default(autoincrement())
+  discountId Bytes  @map("discount_id") @db.Binary(16)
+  productId  Bytes? @map("product_id") @db.Binary(16)
+  categoryId Int?   @map("category_id")
+
+  discount Discount  @relation(fields: [discountId], references: [id], onDelete: Cascade)
+  product  Product?  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  category Category? @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  @@index([discountId], name: "idx_discount_scopes_discount")
+  @@index([productId], name: "idx_discount_scopes_product")
+  @@index([categoryId], name: "idx_discount_scopes_category")
+  @@map("discount_scopes")
+}
+
+model UserVoucher {
+  id         Bytes             @id @db.Binary(16)
+  userId     Bytes             @map("user_id") @db.Binary(16)
+  discountId Bytes             @map("discount_id") @db.Binary(16)
+  status     UserVoucherStatus @default(SAVED)
+  usedAt     DateTime?         @map("used_at")
+  orderId    Bytes?            @map("order_id") @db.Binary(16)
+  createdAt  DateTime          @default(now()) @map("created_at")
+  updatedAt  DateTime          @updatedAt @map("updated_at")
+
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  discount Discount @relation(fields: [discountId], references: [id], onDelete: Cascade)
+  order    Order?   @relation(fields: [orderId], references: [id], onDelete: SetNull)
+
+  @@unique([userId, discountId], name: "uq_user_voucher")
+  @@index([userId], name: "idx_user_vouchers_user")
+  @@index([discountId], name: "idx_user_vouchers_discount")
+  @@index([status], name: "idx_user_vouchers_status")
+  @@map("user_vouchers")
 }

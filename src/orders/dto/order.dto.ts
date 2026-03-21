@@ -1,5 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsString, IsArray, ValidateNested, IsInt, Min } from 'class-validator';
+import { IsString, IsArray, ValidateNested, IsInt, Min, IsOptional } from 'class-validator';
 import { Type } from 'class-transformer';
 
 export class OrderItemDto {
@@ -27,4 +27,10 @@ export class PlaceOrderDto {
     @ApiProperty({ example: 'CREDIT_CARD', description: 'Payment method' })
     @IsString()
     paymentMethod: string;
+
+    @ApiProperty({ example: ['uuid-1', 'uuid-2'], description: 'Optional voucher IDs applied', required: false })
+    @IsArray()
+    @IsOptional()
+    @IsString({ each: true })
+    appliedVouchers?: string[];
 }
